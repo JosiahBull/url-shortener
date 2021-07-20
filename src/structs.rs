@@ -1,20 +1,29 @@
 use rocket::outcome::Outcome::*;
 use crate::common::*;
-use rocket::request::FromParam;
-use rocket::data::{self, Data, FromData, ToByteUnit};
+use rocket::data::{self, Data, FromData};
+use rocket_sync_db_pools::{diesel, database};
+
+#[database("sqlite_shares")]
+pub struct SharesDbConn(diesel::SqliteConnection);
 
 #[derive(Debug)]
-pub enum UrlParseError {
+pub enum ShareError {
 
 }
 
-impl std::error::Error for UrlParseError {
+impl From<ShareError> for String {
+    fn from(err: ShareError) -> String {
+        "A share error occcured!".into()
+    }
+}
+
+impl std::error::Error for ShareError {
     fn description(&self) -> &str {
         "Failed to parse url correctly."
     }
 }
 
-impl std::fmt::Display for UrlParseError {
+impl std::fmt::Display for ShareError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         // match &*self {
 
@@ -33,55 +42,56 @@ pub struct UrlID {
     url: String,
 }
 
+
+
 impl Default for UrlID {
     fn default() -> Self {
         UrlID {
             exp: std::u64::MAX,
             crt: get_time_seconds(),
-            url: "".into(),
+            url: String::default(),
         }
     }
 }
 
 impl UrlID {
-    fn new(url: String) -> Self {
+    pub fn new(url: &str) -> Self {
         let mut def = Self::default();
-        def.url = url;
+        def.url = url.to_owned();
         def
     }
 
-    fn set_url(mut self, url: &str) -> Self {
+    pub fn from_id(id: &str, conn: SharesDbConn) -> Self {
+        //TODO
+        Self::default()
+    }
+
+    pub fn set_url(mut self, url: &str) -> Self {
         self.url = url.to_owned();
         self
     }
 
-    fn set_exp(mut self, exp: &u64) -> Self {
+    pub fn set_exp(mut self, exp: &u64) -> Self {
         self.exp = exp.to_owned();
         self
     }
 
-    fn get_shorten_url(self) -> String {
-        "Not yet implemented".into()
+    pub fn get_shorten_url(&self) -> Result<String, ShareError> {
+        Ok("Not yet implemented".into())
     }
-}
 
-impl<'r> FromParam<'r> for UrlID {
-    type Error = UrlParseError;
-
-    fn from_param(param: &'r str) -> Result<Self, Self::Error> {
-        Ok(UrlID::default())
+    pub fn get_dest_url(self) -> String {
+        self.url
     }
 }
 
 #[rocket::async_trait]
 impl<'r> FromData<'r> for UrlID {
-    type Error = UrlParseError;
+    type Error = ShareError;
     async fn from_data(req: &'r rocket::request::Request<'_>, data: Data<'r>) -> data::Outcome<'r, Self> {
-        //This is expected to be a conversion from a post request as a new friend
-        //Convert from serde
+        //This is expected to be a conversion from a post request as a new url for shortening
+        //Convert from serde based on the incoming data
 
-
-        //Attempt to find the requested file
         Success(UrlID {
             exp: std::u64::MAX,
             crt: std::u64::MAX,
