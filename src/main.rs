@@ -1,11 +1,13 @@
 //! Shorten a URL by POSTing to an endpoint, then GETs to that url will be forwarded on.
 
 #[macro_use] extern crate rocket;
-
+#[macro_use] extern crate diesel;
+use diesel::prelude::*;
 mod structs;
 mod common;
+mod schema;
 use structs::*;
-use rocket_sync_db_pools::{diesel, database};
+use rocket_sync_db_pools::database;
 use rocket::response::Redirect;
 
 //Configuration
@@ -19,17 +21,32 @@ const SERVER_DOMAIN: &str = "127.0.0.1";
 /// }
 /// ```
 #[post("/shorten", data = "<url_id>")]
-async fn create_shortened_url(url_id: UrlID) -> Result<String, String> {
+async fn create_shortened_url(url_id: UrlID, conn: SharesDbConn) -> Result<String, String> {
     //TODO Log new shortened URL to the db.
-    Ok(url_id.get_shorten_url()?)
+    use schema::shares::dsl::*;
+    // diesel::insert_into(shares::table)
+    //     .values(&url_id)
+    //     .execute(conn)
+    //     .expect("Error saving new post");
+
+    Ok(url_id.get_shorten_url()?.to_owned())
 }
 
 ///Redirect the user to a shared url
 #[get("/<id>")]
 fn get_page(id: String, conn: SharesDbConn) -> Redirect {
-    let url_id: UrlID = UrlID::from_id(&id, conn);
+    use schema::shares::dsl::*;
 
-    Redirect::to(url_id.get_dest_url())
+    // let url_id: UrlID = UrlID::from_token(&id, conn);
+
+    let results = shares
+        .limit(5)
+        .load::<structs::UrlID>(&conn)
+        .expect("Failed to contact db");
+
+
+    // Redirect::to(url_id.get_dest_url().to_owned())
+    Redirect::to("google.com")
 }
 
 #[catch(404)]

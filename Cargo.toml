@@ -8,6 +8,9 @@ edition = "2018"
 [dependencies]
 rocket = "0.5.0-rc.1"
 dotenv = "0.15.0"
+diesel = { version = "1.4.7", default-features = true, features = ["chrono", "serde_json", "uuid", "numeric", "libsqlite3-sys"]}
+
+serde = { version = "1.0", features = ["derive"] }
 
 [dependencies.rocket_sync_db_pools]
 version = "0.1.0-rc.1"

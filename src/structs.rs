@@ -1,7 +1,9 @@
 use rocket::outcome::Outcome::*;
 use crate::common::*;
 use rocket::data::{self, Data, FromData};
-use rocket_sync_db_pools::{diesel, database};
+use rocket_sync_db_pools::database;
+use crate::schema::shares;
+use serde::{Serialize, Deserialize};
 
 #[database("sqlite_shares")]
 pub struct SharesDbConn(diesel::SqliteConnection);
@@ -33,23 +35,32 @@ impl std::fmt::Display for ShareError {
 }
 
 /// This struct represents a valid url ID
+#[derive(Eq, PartialEq, Debug, Serialize, Deserialize, Queryable)]
 pub struct UrlID {
+    ///ID
+    pub id: Option<u64>,
     /// When this url expires
-    exp: u64,
+    pub exp: u64,
     /// When this url was created
-    crt: u64,
+    pub crt: u64,
     /// Url this redirects to
-    url: String,
+    pub url: String,
+    /// Has this token expired
+    pub expired: bool,
+    ///The token that the custom url uses
+    pub token: String,
 }
-
 
 
 impl Default for UrlID {
     fn default() -> Self {
         UrlID {
+            id: None,
             exp: std::u64::MAX,
             crt: get_time_seconds(),
             url: String::default(),
+            expired: bool::default(),
+            token: String::default(),
         }
     }
 }
@@ -61,7 +72,7 @@ impl UrlID {
         def
     }
 
-    pub fn from_id(id: &str, conn: SharesDbConn) -> Self {
+    pub fn from_token(id: &str, conn: SharesDbConn) -> Self {
         //TODO
         Self::default()
     }
@@ -76,12 +87,19 @@ impl UrlID {
         self
     }
 
-    pub fn get_shorten_url(&self) -> Result<String, ShareError> {
-        Ok("Not yet implemented".into())
+    pub fn get_dest_url(&self) -> &str {
+        &self.url
     }
 
-    pub fn get_dest_url(self) -> String {
-        self.url
+    pub fn generate_token(mut self) -> Result<Self, ShareError> {
+        //Todo generate token here
+        self.token="TemporaryToken".into();
+        
+        Ok(self)
+    }
+
+    pub fn get_shorten_url(&self) -> Result<&str, ShareError> {
+        Ok(&self.token)
     }
 }
 
@@ -96,6 +114,9 @@ impl<'r> FromData<'r> for UrlID {
             exp: std::u64::MAX,
             crt: std::u64::MAX,
             url: "www.google.com".into(),
+            id: None,
+            expired: false,
+            token: "TemporaryToken".into(),
         })
     }
 }
