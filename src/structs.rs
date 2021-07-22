@@ -56,11 +56,11 @@ pub struct SharesDbConn(rusqlite::Connection);
 #[derive(Debug)]
 pub struct UrlID {
     ///ID
-    id: Option<u64>,
+    id: Option<i64>,
     /// When this url expires
-    exp: u64,
+    exp: i64,
     /// When this url was created
-    crt: u64,
+    crt: i64,
     /// Url this redirects to
     url: String,
     /// Has this token expired
@@ -74,7 +74,7 @@ impl Default for UrlID {
     fn default() -> Self {
         UrlID {
             id: None,
-            exp: std::u64::MAX,
+            exp: std::i64::MAX,
             crt: get_time_seconds(),
             url: String::default(),
             expired: bool::default(),
@@ -100,13 +100,32 @@ impl UrlID {
         self
     }
 
-    pub fn set_exp(mut self, exp: &u64) -> Self {
+    pub fn set_exp(mut self, exp: &i64) -> Self {
         self.exp = exp.to_owned();
         self
     }
 
     pub fn get_dest_url(&self) -> &str {
         &self.url
+    }
+    
+    pub fn get_exp(&self) -> &i64 {
+        &self.exp
+    }
+
+    pub fn get_crt(&self) -> &i64 {
+        &self.crt
+    }
+
+    pub fn is_expired(&self) -> &bool {
+        &self.expired
+    }
+
+    pub fn get_token(&self) -> Result<&str, ShareError> {
+        if let Some(token) = &self.token {
+            return Ok(token);
+        }
+        Err(ShareError::A("No Token!".into()))
     }
 
     pub fn generate_token(mut self) -> Result<Self, ShareError> {
@@ -117,6 +136,7 @@ impl UrlID {
     }
 
     pub fn get_shorten_url(&self) -> Result<&str, ShareError> {
+        //TODO make this return a proper URL, just not the token.
         if let Some(token) = &self.token {
             return Ok(token);
         }
@@ -131,14 +151,7 @@ impl<'r> FromData<'r> for UrlID {
         //This is expected to be a conversion from a post request as a new url for shortening
         //Convert from serde based on the incoming data
 
-        Success(UrlID {
-            exp: std::u64::MAX,
-            crt: std::u64::MAX,
-            url: "www.google.com".into(),
-            id: None,
-            expired: false,
-            token: Some("Temporary Token".into()),
-        })
+        Success(UrlID::default())
     }
 }
 

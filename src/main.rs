@@ -20,10 +20,11 @@ const SERVER_DOMAIN: &str = "127.0.0.1";
 /// }
 /// ```
 #[post("/shorten", data = "<url_id>")]
-async fn create_shortened_url(mut url_id: UrlID, conn: SharesDbConn) -> Result<String, String> {
-    url_id = url_id.generate_token()?;
-    add_to_database(&url_id).await?;
-    Ok(url_id.get_shorten_url()?.to_owned())
+async fn create_shortened_url(url_id: UrlID, conn: SharesDbConn) -> Result<String, String> {
+    let url_id = url_id.generate_token()?;
+    let url = url_id.get_shorten_url()?.to_owned();
+    add_to_database(&conn, url_id).await?;
+    Ok(url)
 }
 
 ///Initally Setup the Db
@@ -36,9 +37,9 @@ async fn setup_db(conn: SharesDbConn) -> Result<String, String> {
 ///Redirect the user to a shared url
 #[get("/<id>")]
 fn get_page(id: String, conn: SharesDbConn) -> Option<Redirect> {    
-    if let Ok(url_id) = UrlID::from_token(&id) {
-        return Some(Redirect::to(url_id.get_dest_url().to_owned()));
-    }
+    // if let Ok(url_id) = UrlID::from_token(&id) {
+    //     return Some(Redirect::to(url_id.get_dest_url().to_owned()));
+    // }
     None
 }
 
@@ -50,7 +51,7 @@ fn not_found(req: &rocket::Request) -> String {
 #[launch]
 fn rocket() -> _ {
     rocket::build()
-        .mount("/", routes![get_page, create_shortened_url, setup_db])
+        .mount("/", routes![create_shortened_url, get_page, setup_db])
         .register("/", catchers![not_found])
         .attach(SharesDbConn::fairing())
 }
