@@ -35,11 +35,23 @@ async fn setup_db(conn: SharesDbConn) -> Result<String, String> {
 
 ///Redirect the user to a shared url
 #[get("/<id>")]
-fn get_page(id: String, conn: SharesDbConn) -> Option<Redirect> {    
-    if let Ok(url_id) = UrlID::from_token(&id) {
-        return Some(Redirect::to(url_id.get_dest_url().to_owned()));
-    }
+async fn get_page(id: String, conn: SharesDbConn) -> Option<Redirect> {    
+    // struct Search {
+
+    // }
+    // impl database::Searchable for Search {
+    //     fn select(&self) -> String {
+    //         "url = \"www.google.com\"".into()
+    //     }
+    // }
+    // let search = Search {};
+    // let result = search_database(&conn, search).await.unwrap();
+    // println!("{:?}", result);
+    // if let Ok(url_id) = UrlID::from_token(&id) {
+        // return Some(Redirect::to(url_id.get_dest_url().to_owned()));
+    // }
     None
+    // Some(Redirect::to("Good things!"))
 }
 
 #[catch(404)]

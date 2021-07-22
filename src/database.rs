@@ -1,8 +1,14 @@
 use crate::structs::{DatabaseError, SharesDbConn, UrlID};
-use rocket_sync_db_pools::rusqlite::params;
+use rocket_sync_db_pools::rusqlite::{self, params};
+//Only use tokio in dev mode to run async tests
 
 pub trait Searchable {
     fn select(&self) -> String; 
+}
+
+pub trait FromDatabase: Sized {
+    type Error: Send + std::fmt::Debug + Into<rocket_sync_db_pools::rusqlite::Error>;
+    fn from_database(data: &rocket_sync_db_pools::rusqlite::Row<'_> ) -> Result<Self, Self::Error>;
 }
 
 pub async fn setup(conn: &SharesDbConn) -> Result<(), DatabaseError> {
@@ -12,29 +18,38 @@ pub async fn setup(conn: &SharesDbConn) -> Result<(), DatabaseError> {
             exp BIGINT NOT NULL,
             crt BIGINT INT NOT NULL,
             url TEXT NOT NULL,
-            expired BOOLEAN NOT NULL DEFAULT 'f',
+            expired BOOLEAN NOT NULL,
             token TEXT
         );", [])
     }).await?;
-
     Ok(())
 }
 
 pub async fn add_to_database(conn: &SharesDbConn, data: UrlID) -> Result<(), DatabaseError> {
     let token = data.get_token().unwrap().to_owned();
-    let result = conn.run(move |c| {
+    conn.run(move |c| {
         c.execute("
-        INSERT INTO shares (exp, crt, url, token)
-        VALUES (?1, ?2, ?3, ?4)
-        ;", params![data.get_exp(), data.get_crt(), data.get_dest_url(), token])
-    }).await;
-    println!("{:?}", result);
+        INSERT INTO shares (exp, crt, url, expired, token)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        ;", params![data.get_exp(), data.get_crt(), data.get_dest_url(), data.is_expired(), token])
+    }).await?;
     Ok(())
 }
 
-pub async fn search_database<T: Searchable>(conn: &SharesDbConn, search: T) -> Result<Option<UrlID>, DatabaseError> {
-    //TODO
-    Ok(None)
+pub async fn search_database<T>(conn: &SharesDbConn, search: T) -> Result<Option<Vec<UrlID>>, DatabaseError> 
+where T: Searchable + Send + Sync + 'static {
+    let result = conn.run(move |c| {
+        c.prepare(&format!("Select * FROM shares WHERE {}", search.select()))
+        .and_then(|mut res: rusqlite::Statement| -> std::result::Result<Vec<UrlID>, rusqlite::Error> {
+            res.query_map([], |row| {
+                Ok(UrlID::from_database(row)?)
+            }).unwrap().collect()
+        })
+    }).await?;
+    if result.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(result))
 }
 
 pub async fn edit_share<T: Searchable>(conn: &SharesDbConn, search: T, new_item: UrlID) -> Result<(), DatabaseError> {

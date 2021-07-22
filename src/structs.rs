@@ -32,6 +32,7 @@ impl std::fmt::Display for ShareError {
     }
 }
 
+#[derive(Debug)]
 pub enum DatabaseError {
     A(String)
 }
@@ -59,17 +60,19 @@ pub struct UrlID {
     ///ID
     id: Option<i64>,
     /// When this url expires
+    #[serde(default)]
     exp: i64,
     /// When this url was created
+    #[serde(default)]
     crt: i64,
     /// Url this redirects to
     url: String,
     /// Has this token expired
+    #[serde(default)]
     expired: bool,
     ///The token that the custom url uses
     token: Option<String>,
 }
-
 
 impl Default for UrlID {
     fn default() -> Self {
@@ -91,18 +94,13 @@ impl UrlID {
         def
     }
 
-    pub fn from_token(id: &str) -> Result<Self, ShareError> {
-        //TODO
-        Ok(Self::default())
-    }
-
-    pub fn set_url(mut self, url: &str) -> Self {
-        self.url = url.to_owned();
+    pub fn set_exp(mut self, exp: &i64) -> Self {
+        self.exp = exp.to_owned();
         self
     }
 
-    pub fn set_exp(mut self, exp: &i64) -> Self {
-        self.exp = exp.to_owned();
+    pub fn set_dest_url(mut self, url: &str) -> Self {
+        self.url = url.to_owned();
         self
     }
 
@@ -145,6 +143,21 @@ impl UrlID {
     }
 }
 
+impl crate::database::FromDatabase for UrlID {
+    type Error = rusqlite::Error;
+    fn from_database(row: &rusqlite::Row<'_> ) -> Result<UrlID, rusqlite::Error> {
+        //SAFTEY: These should be safe, as the types with unwraps are disallowed from being null in the schema of the db.
+        Ok(UrlID {
+            id: row.get(0).unwrap_or(None),
+            exp: row.get(1).unwrap(),
+            crt: row.get(2).unwrap(),
+            url: row.get(3).unwrap(),
+            expired: row.get(4).unwrap(),
+            token: row.get(5).unwrap_or(None),
+        })
+    }
+}
+
 #[rocket::async_trait]
 impl<'r> FromData<'r> for UrlID {
     type Error = ShareError;
@@ -166,7 +179,7 @@ impl<'r> FromData<'r> for UrlID {
         let string = rocket::request::local_cache!(req, string);
 
         // Attempt to parse the string with serde into our struct
-        let mut share: UrlID = match serde_json::from_str(string) {
+        let share: UrlID = match serde_json::from_str(string) {
             Ok(share) => share,
             Err(e) => return Failure((Status::BadRequest, ShareError::A(format!("Unable to parse string with serde: {}", e.to_string())))),
         };
