@@ -20,19 +20,9 @@ const SERVER_DOMAIN: &str = "127.0.0.1";
 /// }
 /// ```
 #[post("/shorten", data = "<url_id>")]
-async fn create_shortened_url(url_id: UrlID, conn: SharesDbConn) -> Result<String, String> {
-    //TODO Log new shortened URL to the db.
-    conn.run(|c| {
-        c.execute("CREATE TABLE shares (
-            id MEDIUMINT(255) PRIMARY KEY,
-            exp INTEGER(255) NOT NULL,
-            crt INTEGER(255) NOT NULL,
-            url TEXT NOT NULL,
-            expired BOOLEAN NOT NULL DEFAULT 'f',
-            token TEXT NOT NULL
-        )", []).unwrap();
-    }).await;
-
+async fn create_shortened_url(mut url_id: UrlID, conn: SharesDbConn) -> Result<String, String> {
+    url_id = url_id.generate_token()?;
+    add_to_database(&url_id).await?;
     Ok(url_id.get_shorten_url()?.to_owned())
 }
 
@@ -45,12 +35,11 @@ async fn setup_db(conn: SharesDbConn) -> Result<String, String> {
 
 ///Redirect the user to a shared url
 #[get("/<id>")]
-fn get_page(id: String, conn: SharesDbConn) -> Redirect {    
-    
-    //TODO Implement result type on this, on error forward to 404 handler!
-    let url_id: UrlID = UrlID::from_token(&id);
-
-    Redirect::to(url_id.get_dest_url().to_owned())
+fn get_page(id: String, conn: SharesDbConn) -> Option<Redirect> {    
+    if let Ok(url_id) = UrlID::from_token(&id) {
+        return Some(Redirect::to(url_id.get_dest_url().to_owned()));
+    }
+    None
 }
 
 #[catch(404)]

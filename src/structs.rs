@@ -56,17 +56,17 @@ pub struct SharesDbConn(rusqlite::Connection);
 #[derive(Debug)]
 pub struct UrlID {
     ///ID
-    pub id: Option<u64>,
+    id: Option<u64>,
     /// When this url expires
-    pub exp: u64,
+    exp: u64,
     /// When this url was created
-    pub crt: u64,
+    crt: u64,
     /// Url this redirects to
-    pub url: String,
+    url: String,
     /// Has this token expired
-    pub expired: bool,
+    expired: bool,
     ///The token that the custom url uses
-    pub token: String,
+    token: Option<String>,
 }
 
 
@@ -78,7 +78,7 @@ impl Default for UrlID {
             crt: get_time_seconds(),
             url: String::default(),
             expired: bool::default(),
-            token: String::default(),
+            token: None,
         }
     }
 }
@@ -90,9 +90,9 @@ impl UrlID {
         def
     }
 
-    pub fn from_token(id: &str) -> Self {
+    pub fn from_token(id: &str) -> Result<Self, ShareError> {
         //TODO
-        Self::default()
+        Ok(Self::default())
     }
 
     pub fn set_url(mut self, url: &str) -> Self {
@@ -111,13 +111,16 @@ impl UrlID {
 
     pub fn generate_token(mut self) -> Result<Self, ShareError> {
         //Todo generate token here
-        self.token="TemporaryToken".into();
+        self.token=Some("TemporaryToken".into());
         
         Ok(self)
     }
 
     pub fn get_shorten_url(&self) -> Result<&str, ShareError> {
-        Ok(&self.token)
+        if let Some(token) = &self.token {
+            return Ok(token);
+        }
+        Err(ShareError::A("No Token!".into()))
     }
 }
 
@@ -134,7 +137,7 @@ impl<'r> FromData<'r> for UrlID {
             url: "www.google.com".into(),
             id: None,
             expired: false,
-            token: "TemporaryToken".into(),
+            token: Some("Temporary Token".into()),
         })
     }
 }
