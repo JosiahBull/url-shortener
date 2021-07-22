@@ -20,8 +20,7 @@ const SERVER_DOMAIN: &str = "127.0.0.1";
 /// ```
 #[post("/shorten", data = "<url_id>")]
 async fn create_shortened_url(url_id: UrlID, conn: SharesDbConn) -> Result<String, String> {
-    let url_id = url_id.generate_token()?;
-    let url = url_id.get_shorten_url()?.to_owned();
+    let url = url_id.get_shorten_url();
     add_to_database(&conn, url_id).await?;
     Ok(url)
 }

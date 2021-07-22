@@ -71,7 +71,7 @@ pub struct UrlID {
     #[serde(default)]
     expired: bool,
     ///The token that the custom url uses
-    token: Option<String>,
+    token: String,
 }
 
 impl Default for UrlID {
@@ -82,7 +82,7 @@ impl Default for UrlID {
             crt: get_time_seconds(),
             url: String::default(),
             expired: bool::default(),
-            token: None,
+            token: String::default(),
         }
     }
 }
@@ -120,26 +120,17 @@ impl UrlID {
         &self.expired
     }
 
-    pub fn get_token(&self) -> Result<&str, ShareError> {
-        if let Some(token) = &self.token {
-            return Ok(token);
-        }
-        Err(ShareError::A("No Token!".into()))
+    pub fn get_token(&self) -> &str {
+        &self.token
     }
 
-    pub fn generate_token(mut self) -> Result<Self, ShareError> {
-        //Todo generate token here
-        self.token=Some("TemporaryToken".into());
-        
-        Ok(self)
+    pub fn get_id(&self) -> Option<i64> {
+        self.id
     }
 
-    pub fn get_shorten_url(&self) -> Result<&str, ShareError> {
+    pub fn get_shorten_url(&self) -> String {
         //TODO make this return a proper URL, just not the token.
-        if let Some(token) = &self.token {
-            return Ok(token);
-        }
-        Err(ShareError::A("No Token!".into()))
+        format!("http://127.0.0.1/{}", self.token)
     }
 }
 
@@ -153,7 +144,7 @@ impl crate::database::FromDatabase for UrlID {
             crt: row.get(2).unwrap(),
             url: row.get(3).unwrap(),
             expired: row.get(4).unwrap(),
-            token: row.get(5).unwrap_or(None),
+            token: row.get(5).unwrap(),
         })
     }
 }

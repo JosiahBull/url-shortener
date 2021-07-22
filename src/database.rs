@@ -2,8 +2,28 @@ use crate::structs::{DatabaseError, SharesDbConn, UrlID};
 use rocket_sync_db_pools::rusqlite::{self, params};
 //Only use tokio in dev mode to run async tests
 
-pub trait Searchable {
-    fn select(&self) -> String; 
+pub enum Search {
+    Id(i64),
+    Url(String),
+    Token(String),
+}
+
+impl Search {
+    fn get_search_term(self) -> String {
+        match self {
+            Search::Id(s) => format!("{} = {}", "id", s),
+            Search::Url(s) => format!("{} = {}", "url", s),
+            Search::Token(s) => format!("{} = {}", "token", s),
+        }
+    }
+
+    async fn find_share(self, conn: &SharesDbConn) -> Result<UrlID, DatabaseError> {
+        let search_result = search_database(conn, self).await?;
+        if search_result.is_empty() {
+            return Err(DatabaseError::A("Unable to find share to edit".into()));
+        }
+        Ok(search_result[0].clone()) //Assume first result is correct, user will use search::id() variant if exactness is important.
+    }
 }
 
 pub trait FromDatabase: Sized {
@@ -26,38 +46,66 @@ pub async fn setup(conn: &SharesDbConn) -> Result<(), DatabaseError> {
 }
 
 pub async fn add_to_database(conn: &SharesDbConn, data: UrlID) -> Result<(), DatabaseError> {
-    let token = data.get_token().unwrap().to_owned();
     conn.run(move |c| {
         c.execute("
         INSERT INTO shares (exp, crt, url, expired, token)
         VALUES (?1, ?2, ?3, ?4, ?5)
-        ;", params![data.get_exp(), data.get_crt(), data.get_dest_url(), data.is_expired(), token])
+        ;", params![
+            data.get_exp(), 
+            data.get_crt(), 
+            data.get_dest_url(), 
+            data.is_expired(), 
+            data.get_token()
+        ])
     }).await?;
     Ok(())
 }
 
-pub async fn search_database<T>(conn: &SharesDbConn, search: T) -> Result<Option<Vec<UrlID>>, DatabaseError> 
-where T: Searchable + Send + Sync + 'static {
+pub async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<UrlID>, DatabaseError> {
     let result = conn.run(move |c| {
-        c.prepare(&format!("Select * FROM shares WHERE {}", search.select()))
+        c.prepare(&format!("Select * FROM shares WHERE {}", search.get_search_term()))
         .and_then(|mut res: rusqlite::Statement| -> std::result::Result<Vec<UrlID>, rusqlite::Error> {
             res.query_map([], |row| {
                 Ok(UrlID::from_database(row)?)
             }).unwrap().collect()
         })
     }).await?;
-    if result.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(result))
+    Ok(result)
 }
 
-pub async fn edit_share<T: Searchable>(conn: &SharesDbConn, search: T, new_item: UrlID) -> Result<(), DatabaseError> {
-    //TODO
+pub async fn edit_share(conn: &SharesDbConn, search: Search, new_share: UrlID) -> Result<(), DatabaseError> {
+    let search_result = search.find_share(conn).await?;
+    conn.run(move |c| {
+        //SAFTEY: As we are searching by ID to update a share, we shouldn't ever update more than one UrlID at a time.
+        c.execute("
+            UPDATE shares
+            SET exp = ?1
+                crt = ?2
+                url = ?3
+                expired = ?4
+                token = ?5
+            WHERE
+                id = ?6
+        ", params![
+            new_share.get_exp(), 
+            new_share.get_crt(), 
+            new_share.get_dest_url(), 
+            new_share.is_expired(), 
+            new_share.get_token(), 
+            search_result.get_id() //Assume the first result we got from the search is the one the user was requesting. This could be improved - maybe force ID-only search?
+        ])
+    }).await?;
     Ok(())
 }
 
-pub async fn remove_share<T: Searchable>(conn: &SharesDbConn, search: T) -> Result<(), DatabaseError> {
-    //TODO
+pub async fn remove_share(conn: &SharesDbConn, search: Search) -> Result<(), DatabaseError> {
+    let search_result = search.find_share(conn).await?;
+    conn.run(move |c| {
+        c.execute("
+        DELETE FROM shares
+        WHERE
+            id = ?1
+        ", params![search_result.get_id()])
+    }).await?;
     Ok(())
 }
