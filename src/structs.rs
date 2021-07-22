@@ -1,8 +1,9 @@
 use rocket::outcome::Outcome::*;
 use crate::common::*;
-use rocket::data::{self, Data, FromData};
+use rocket::data::{self, Data, FromData, ToByteUnit};
 use rocket_sync_db_pools::{rusqlite, database};
-
+use rocket::http::{Status, ContentType, Header};
+use serde::{Serialize, Deserialize};
 ///// Error Structs /////
 
 #[derive(Debug)]
@@ -53,7 +54,7 @@ impl From<DatabaseError> for String {
 pub struct SharesDbConn(rusqlite::Connection);
 
 /// This struct represents a valid url ID
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct UrlID {
     ///ID
     id: Option<i64>,
@@ -148,10 +149,29 @@ impl UrlID {
 impl<'r> FromData<'r> for UrlID {
     type Error = ShareError;
     async fn from_data(req: &'r rocket::request::Request<'_>, data: Data<'r>) -> data::Outcome<'r, Self> {
-        //This is expected to be a conversion from a post request as a new url for shortening
-        //Convert from serde based on the incoming data
+        //Ensure correct content type
+        let share_ct = ContentType::new("application", "json");
+        if req.content_type() != Some(&share_ct) {
+            return Failure((Status::UnsupportedMediaType, ShareError::A("Content Type Failure".into())));
+        }
 
-        Success(UrlID::default())
+        let limit = 1024.bytes(); //Set the maximum size we'll unwrap
+        //Read the data
+        let string = match data.open(limit).into_string().await {
+            Ok(string) if string.is_complete() => string.into_inner(),
+            Ok(_) => return Failure((Status::PayloadTooLarge, ShareError::A("Too large".into()))),
+            Err(e) => return Failure((Status::InternalServerError, ShareError::A(e.to_string()))),
+        };
+        
+        let string = rocket::request::local_cache!(req, string);
+
+        // Attempt to parse the string with serde into our struct
+        let mut share: UrlID = match serde_json::from_str(string) {
+            Ok(share) => share,
+            Err(e) => return Failure((Status::BadRequest, ShareError::A(format!("Unable to parse string with serde: {}", e.to_string())))),
+        };
+
+        Success(share)
     }
 }
 

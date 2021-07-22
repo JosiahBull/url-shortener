@@ -6,11 +6,10 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rocket = "0.5.0-rc.1"
+rocket = { version = "0.5.0-rc.1", features = []}
 dotenv = "0.15.0"
-diesel = { version = "1.4.7", default-features = true, features = ["chrono", "serde_json", "uuid", "numeric", "libsqlite3-sys"]}
-
-serde = { version = "1.0", features = ["derive"] }
+serde = "1.0.126"
+serde_json = "1.0.59"
 
 [dependencies.rocket_sync_db_pools]
 version = "0.1.0-rc.1"

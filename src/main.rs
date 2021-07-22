@@ -1,7 +1,6 @@
 //! Shorten a URL by POSTing to an endpoint, then GETs to that url will be forwarded on.
 
 #[macro_use] extern crate rocket;
-#[macro_use] extern crate diesel;
 mod structs;
 mod common;
 mod database;
@@ -37,9 +36,9 @@ async fn setup_db(conn: SharesDbConn) -> Result<String, String> {
 ///Redirect the user to a shared url
 #[get("/<id>")]
 fn get_page(id: String, conn: SharesDbConn) -> Option<Redirect> {    
-    // if let Ok(url_id) = UrlID::from_token(&id) {
-    //     return Some(Redirect::to(url_id.get_dest_url().to_owned()));
-    // }
+    if let Ok(url_id) = UrlID::from_token(&id) {
+        return Some(Redirect::to(url_id.get_dest_url().to_owned()));
+    }
     None
 }
 
