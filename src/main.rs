@@ -2,12 +2,11 @@
 
 #[macro_use] extern crate rocket;
 #[macro_use] extern crate diesel;
-use diesel::prelude::*;
 mod structs;
 mod common;
-mod schema;
+mod database;
 use structs::*;
-use rocket_sync_db_pools::database;
+use database::*;
 use rocket::response::Redirect;
 
 //Configuration
@@ -23,30 +22,35 @@ const SERVER_DOMAIN: &str = "127.0.0.1";
 #[post("/shorten", data = "<url_id>")]
 async fn create_shortened_url(url_id: UrlID, conn: SharesDbConn) -> Result<String, String> {
     //TODO Log new shortened URL to the db.
-    use schema::shares::dsl::*;
-    // diesel::insert_into(shares::table)
-    //     .values(&url_id)
-    //     .execute(conn)
-    //     .expect("Error saving new post");
+    conn.run(|c| {
+        c.execute("CREATE TABLE shares (
+            id MEDIUMINT(255) PRIMARY KEY,
+            exp INTEGER(255) NOT NULL,
+            crt INTEGER(255) NOT NULL,
+            url TEXT NOT NULL,
+            expired BOOLEAN NOT NULL DEFAULT 'f',
+            token TEXT NOT NULL
+        )", []).unwrap();
+    }).await;
 
     Ok(url_id.get_shorten_url()?.to_owned())
 }
 
+///Initally Setup the Db
+#[get("/setup")]
+async fn setup_db(conn: SharesDbConn) -> Result<String, String> {
+    database::setup(&conn).await?;
+    Ok("Success".into())
+}
+
 ///Redirect the user to a shared url
 #[get("/<id>")]
-fn get_page(id: String, conn: SharesDbConn) -> Redirect {
-    use schema::shares::dsl::*;
+fn get_page(id: String, conn: SharesDbConn) -> Redirect {    
+    
+    //TODO Implement result type on this, on error forward to 404 handler!
+    let url_id: UrlID = UrlID::from_token(&id);
 
-    // let url_id: UrlID = UrlID::from_token(&id, conn);
-
-    let results = shares
-        .limit(5)
-        .load::<structs::UrlID>(&conn)
-        .expect("Failed to contact db");
-
-
-    // Redirect::to(url_id.get_dest_url().to_owned())
-    Redirect::to("google.com")
+    Redirect::to(url_id.get_dest_url().to_owned())
 }
 
 #[catch(404)]
@@ -57,7 +61,7 @@ fn not_found(req: &rocket::Request) -> String {
 #[launch]
 fn rocket() -> _ {
     rocket::build()
-        .mount("/", routes![get_page, create_shortened_url])
+        .mount("/", routes![get_page, create_shortened_url, setup_db])
         .register("/", catchers![not_found])
         .attach(SharesDbConn::fairing())
 }

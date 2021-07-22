@@ -1,16 +1,13 @@
 use rocket::outcome::Outcome::*;
 use crate::common::*;
 use rocket::data::{self, Data, FromData};
-use rocket_sync_db_pools::database;
-use crate::schema::shares;
-use serde::{Serialize, Deserialize};
+use rocket_sync_db_pools::{rusqlite, database};
 
-#[database("sqlite_shares")]
-pub struct SharesDbConn(diesel::SqliteConnection);
+///// Error Structs /////
 
 #[derive(Debug)]
 pub enum ShareError {
-
+    A(String)
 }
 
 impl From<ShareError> for String {
@@ -34,8 +31,29 @@ impl std::fmt::Display for ShareError {
     }
 }
 
+pub enum DatabaseError {
+    A(String)
+}
+
+impl From<rusqlite::Error> for DatabaseError {
+    fn from(error: rusqlite::Error) -> DatabaseError {
+        DatabaseError::A(error.to_string())
+    }
+}
+
+impl From<DatabaseError> for String {
+    fn from(err: DatabaseError) -> String {
+        "A database error occured!".into()
+    }
+}
+
+/////  Data Structs  /////
+
+#[database("sqlite_shares")]
+pub struct SharesDbConn(rusqlite::Connection);
+
 /// This struct represents a valid url ID
-#[derive(Eq, PartialEq, Debug, Serialize, Deserialize, Queryable)]
+#[derive(Debug)]
 pub struct UrlID {
     ///ID
     pub id: Option<u64>,
@@ -72,7 +90,7 @@ impl UrlID {
         def
     }
 
-    pub fn from_token(id: &str, conn: SharesDbConn) -> Self {
+    pub fn from_token(id: &str) -> Self {
         //TODO
         Self::default()
     }
@@ -120,3 +138,4 @@ impl<'r> FromData<'r> for UrlID {
         })
     }
 }
+
