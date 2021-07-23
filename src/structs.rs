@@ -2,33 +2,56 @@ use rocket::outcome::Outcome::*;
 use crate::common::*;
 use rocket::data::{self, Data, FromData, ToByteUnit};
 use rocket_sync_db_pools::{rusqlite, database};
-use rocket::http::{Status, ContentType, Header};
+use rocket::http::{Status, ContentType};
 use serde::{Serialize, Deserialize};
+
 ///// Error Structs /////
+pub fn get_token(mut id: i64) -> String {
+    //Converting from base 10 (id), to base 36.
+    let mut result: String = String::default();
+    loop {
+        result.insert(0, "0123456789abcdefghijklmnopqrstuvwxyz".chars().nth((id % 36) as usize).unwrap());
+        id = id/36;
+        if id <= 1 {
+            break;
+        }
+    }
+    result
+}
 
 #[derive(Debug)]
 pub enum ShareError {
-    A(String)
+    ContentType,
+    TooLarge,
+    ServerError(String),
+    ParseFailure(String),
 }
 
 impl From<ShareError> for String {
     fn from(err: ShareError) -> String {
-        "A share error occcured!".into()
+        match err {
+            ShareError::ContentType => "incorrect content-type provided on request".into(),
+            ShareError::TooLarge => "request payload too large".into(),
+            ShareError::ServerError(e) => e,
+            ShareError::ParseFailure(e) => e,
+        }
     }
 }
 
 impl std::error::Error for ShareError {
     fn description(&self) -> &str {
-        "Failed to parse url correctly."
+        match &self {
+            ShareError::ContentType => "incorrect content-type provided on request",
+            ShareError::TooLarge => "request payload too large",
+            ShareError::ServerError(e) => &e,
+            ShareError::ParseFailure(e) => &e,
+        }
     }
 }
 
 impl std::fmt::Display for ShareError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        // match &*self {
-
-        //   }
-        f.write_str("Failed to parse the url correctly.")
+        f.write_str(&self.to_string())
     }
 }
 
@@ -156,15 +179,15 @@ impl<'r> FromData<'r> for UrlID {
         //Ensure correct content type
         let share_ct = ContentType::new("application", "json");
         if req.content_type() != Some(&share_ct) {
-            return Failure((Status::UnsupportedMediaType, ShareError::A("Content Type Failure".into())));
+            return Failure((Status::UnsupportedMediaType, ShareError::ContentType));
         }
 
         let limit = 1024.bytes(); //Set the maximum size we'll unwrap
         //Read the data
         let string = match data.open(limit).into_string().await {
             Ok(string) if string.is_complete() => string.into_inner(),
-            Ok(_) => return Failure((Status::PayloadTooLarge, ShareError::A("Too large".into()))),
-            Err(e) => return Failure((Status::InternalServerError, ShareError::A(e.to_string()))),
+            Ok(_) => return Failure((Status::PayloadTooLarge, ShareError::TooLarge)),
+            Err(e) => return Failure((Status::InternalServerError, ShareError::ServerError(e.to_string()))),
         };
         
         let string = rocket::request::local_cache!(req, string);
@@ -172,7 +195,7 @@ impl<'r> FromData<'r> for UrlID {
         // Attempt to parse the string with serde into our struct
         let share: UrlID = match serde_json::from_str(string) {
             Ok(share) => share,
-            Err(e) => return Failure((Status::BadRequest, ShareError::A(format!("Unable to parse string with serde: {}", e.to_string())))),
+            Err(e) => return Failure((Status::BadRequest, ShareError::ParseFailure(e.to_string()))),
         };
 
         Success(share)
