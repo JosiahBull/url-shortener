@@ -1430,6 +1430,7 @@ name = "url-shortener"
 version = "0.1.0"
 dependencies = [
  "dotenv",
+ "rand",
  "rocket",
  "rocket_sync_db_pools",
  "serde",
