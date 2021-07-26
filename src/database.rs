@@ -45,20 +45,28 @@ pub async fn setup(conn: &SharesDbConn) -> Result<(), DatabaseError> {
     Ok(())
 }
 
-pub async fn add_to_database(conn: &SharesDbConn, data: UrlID) -> Result<(), DatabaseError> {
-    conn.run(move |c| {
-        c.execute("
-        INSERT INTO shares (exp, crt, url, expired, token)
-        VALUES (?1, ?2, ?3, ?4, ?5)
-        ;", params![
-            data.get_exp(), 
-            data.get_crt(), 
-            data.get_dest_url(), 
-            data.is_expired(), 
-            data.get_token()
-        ])
+pub async fn add_to_database(conn: &SharesDbConn, data: UrlID) -> Result<UrlID, DatabaseError> {
+    let response: UrlID = conn.run(move |c| -> Result<UrlID, rusqlite::Error> {
+        let tx = c.transaction().unwrap();
+        tx.execute("
+            INSERT INTO shares (exp, crt, url, expired, token)
+            VALUES (?1, ?2, ?3, ?4, ?5);
+        ", params![
+            data.get_exp(), data.get_crt(), data.get_dest_url(), data.is_expired(), data.get_token()
+        ]).expect("failed to create share in db!");
+        let result_data: Vec<UrlID> = tx.prepare("SELECT * FROM shares ORDER BY id DESC LIMIT 1;")
+        .and_then(|mut res: rusqlite::Statement| -> std::result::Result<Vec<UrlID>, rusqlite::Error> {
+            res.query_map([], |row| {
+                Ok(UrlID::from_database(row)?)
+            }).unwrap().collect()
+        }).unwrap();
+        tx.commit().unwrap();
+        //TODO Implement error handling here, lots of unwrap statements which could panic. At min should be exchanged for expect statements, or preferrably proper handling.
+
+        Ok(result_data[0].clone())
     }).await?;
-    Ok(())
+
+    Ok(response)
 }
 
 pub async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<UrlID>, DatabaseError> {
@@ -73,7 +81,7 @@ pub async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<
     Ok(result)
 }
 
-pub async fn edit_share(conn: &SharesDbConn, search: Search, new_share: UrlID) -> Result<(), DatabaseError> {
+pub async fn update_database(conn: &SharesDbConn, search: Search, new_share: UrlID) -> Result<(), DatabaseError> {
     let search_result = search.find_share(conn).await?;
     conn.run(move |c| {
         //SAFTEY: As we are searching by ID to update a share, we shouldn't ever update more than one UrlID at a time.
@@ -98,7 +106,7 @@ pub async fn edit_share(conn: &SharesDbConn, search: Search, new_share: UrlID) -
     Ok(())
 }
 
-pub async fn remove_share(conn: &SharesDbConn, search: Search) -> Result<(), DatabaseError> {
+pub async fn remove_from_database(conn: &SharesDbConn, search: Search) -> Result<(), DatabaseError> {
     let search_result = search.find_share(conn).await?;
     conn.run(move |c| {
         c.execute("

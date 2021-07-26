@@ -94,9 +94,12 @@ impl From<rusqlite::Error> for DatabaseError {
     }
 }
 
+
 impl From<DatabaseError> for String {
     fn from(err: DatabaseError) -> String {
-        "A database error occured!".into()
+        match err {
+            DatabaseError::A(s) => return format!("Database Error: {}", s)
+        } 
     }
 }
 
