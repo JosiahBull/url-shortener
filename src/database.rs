@@ -12,17 +12,17 @@ impl Search {
     fn get_search_term(self) -> String {
         match self {
             Search::Id(s) => format!("{} = {}", "id", s),
-            Search::Url(s) => format!("{} = {}", "url", s),
-            Search::Token(s) => format!("{} = {}", "token", s),
+            Search::Url(s) => format!("{} = '{}'", "url", s),
+            Search::Token(s) => format!("{} = '{}'", "token", s),
         }
     }
 
-    async fn find_share(self, conn: &SharesDbConn) -> Result<UrlID, DatabaseError> {
+    pub async fn find_share(self, conn: &SharesDbConn) -> Result<Option<UrlID>, DatabaseError> {
         let search_result = search_database(conn, self).await?;
         if search_result.is_empty() {
-            return Err(DatabaseError::A("Unable to find share to edit".into()));
+            return Ok(None);
         }
-        Ok(search_result[0].clone()) //Assume first result is correct, user will use search::id() variant if exactness is important.
+        Ok(Some(search_result[0].clone())) //Assume first result is correct, user will use search::id() variant if exactness is important.
     }
 }
 
@@ -82,7 +82,11 @@ pub async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<
 }
 
 pub async fn update_database(conn: &SharesDbConn, search: Search, new_share: UrlID) -> Result<(), DatabaseError> {
-    let search_result: UrlID = search.find_share(conn).await?;
+    let search_result: UrlID = match search.find_share(conn).await? {
+        Some(s) => s,
+        None => return Err(DatabaseError::A("No share available!".into())),
+    };
+
     conn.run(move |c| {
         //SAFTEY: As we are searching by ID to update a share, we shouldn't ever update more than one UrlID at a time.
         c.execute("
@@ -94,21 +98,24 @@ pub async fn update_database(conn: &SharesDbConn, search: Search, new_share: Url
                 token = ?5
             WHERE
                 id = ?6
-            LIMIT 1;
+            ;
         ", params![
             new_share.get_exp(), 
             new_share.get_crt(), 
             new_share.get_dest_url(), 
             new_share.is_expired(), 
-            new_share.get_token().unwrap(), 
-            search_result.get_id().unwrap()
+            new_share.get_token().unwrap(), //TODO
+            search_result.get_id().unwrap() //TODO
         ])
     }).await?;
     Ok(())
 }
 
 pub async fn remove_from_database(conn: &SharesDbConn, search: Search) -> Result<(), DatabaseError> {
-    let search_result = search.find_share(conn).await?;
+    let search_result = match search.find_share(conn).await? {
+        Some(s) => s,
+        None => return Err(DatabaseError::A("No share available!".into())),
+    };
     conn.run(move |c| {
         c.execute("
         DELETE FROM shares

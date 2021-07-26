@@ -36,24 +36,13 @@ async fn setup_db(conn: SharesDbConn) -> Result<String, String> {
 }
 
 ///Redirect the user to a shared url
-#[get("/<id>")]
-async fn get_page(id: String, conn: SharesDbConn) -> Option<Redirect> {    
-    // struct Search {
-
-    // }
-    // impl database::Searchable for Search {
-    //     fn select(&self) -> String {
-    //         "url = \"www.google.com\"".into()
-    //     }
-    // }
-    // let search = Search {};
-    // let result = search_database(&conn, search).await.unwrap();
-    // println!("{:?}", result);
-    // if let Ok(url_id) = UrlID::from_token(&id) {
-        // return Some(Redirect::to(url_id.get_dest_url().to_owned()));
-    // }
-    None
-    // Some(Redirect::to("Good things!"))
+#[get("/<token>")]
+async fn get_page(token: String, conn: SharesDbConn) -> Result<Option<Redirect>, String> { 
+    let search_result = Search::Token(token).find_share(&conn).await?;
+    if search_result.is_none() {
+        return Ok(None)
+    }
+    Ok(Some(Redirect::to(search_result.unwrap().get_dest_url().to_owned()))) //SAFETY: This unwrap is fine as we have checked it is non-null above!
 }
 
 #[catch(404)]

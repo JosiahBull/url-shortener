@@ -11,7 +11,7 @@ use crate::database::*;
 
 ///A 62-char alphabet, which is used for our base conversion into the shortened url.
 const ALPHABET: &[char] = &['0', '1', '2', '3', '4', '5', '6','7','8','9','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
-const TOKEN_MIN_LENGTH_CHARS: usize = 6;
+const TOKEN_MIN_LENGTH_CHARS: usize = 4;
 
 ///Convert a base 10 number to a base 62 number
 fn base_10_to_62(mut id: i64, alphabet: &[char]) -> String {
@@ -37,7 +37,6 @@ fn normalize_length(mut input: String, min_length: usize, alphabet: &[char]) -> 
     }
     input
 }
-
 
 ///// Error Structs /////
 
