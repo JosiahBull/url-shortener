@@ -5,19 +5,13 @@ use rocket_sync_db_pools::{rusqlite, database};
 use rocket::http::{Status, ContentType};
 use serde::{Serialize, Deserialize};
 use rand::Rng;
+use crate::database::*;
 
 //// Helper Functions (mostly for url generation) ////
 
 ///A 62-char alphabet, which is used for our base conversion into the shortened url.
 const ALPHABET: &[char] = &['0', '1', '2', '3', '4', '5', '6','7','8','9','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
 const TOKEN_MIN_LENGTH_CHARS: usize = 6;
-
-///Generate a token for the url link
-fn get_token(id: i64) -> String {
-    let mut token = base_10_to_62(id, ALPHABET);
-    token = normalize_length(token, TOKEN_MIN_LENGTH_CHARS, ALPHABET);
-    token
-}   
 
 ///Convert a base 10 number to a base 62 number
 fn base_10_to_62(mut id: i64, alphabet: &[char]) -> String {
@@ -37,8 +31,8 @@ fn base_10_to_62(mut id: i64, alphabet: &[char]) -> String {
 fn normalize_length(mut input: String, min_length: usize, alphabet: &[char]) -> String {
     let mut rng = rand::thread_rng();
     if input.len() < min_length {
-        for i in 0..(input.len()-min_length+1) {
-            input.push(alphabet[rng.gen_range(0..63)]);
+        for i in 0..(min_length-input.len()+1) {
+            input.push(alphabet[rng.gen_range(0..62)]);
         }
     }
     input
@@ -53,6 +47,9 @@ pub enum ShareError {
     TooLarge,
     ServerError(String),
     ParseFailure(String),
+    IdError,
+    NoToken,
+    DatabaseError(String),
 }
 
 impl From<ShareError> for String {
@@ -62,17 +59,23 @@ impl From<ShareError> for String {
             ShareError::TooLarge => "request payload too large".into(),
             ShareError::ServerError(e) => e,
             ShareError::ParseFailure(e) => e,
+            ShareError::IdError => "attempted to access id, but was none value".into(),
+            ShareError::NoToken => "attempted to access an inaccessible token".into(),
+            ShareError::DatabaseError(e) => e,
         }
     }
 }
 
 impl std::error::Error for ShareError {
     fn description(&self) -> &str {
-        match &self {
+        match self {
             ShareError::ContentType => "incorrect content-type provided on request",
             ShareError::TooLarge => "request payload too large",
             ShareError::ServerError(e) => &e,
             ShareError::ParseFailure(e) => &e,
+            ShareError::IdError => "attempted to access id, but was none value".into(),
+            ShareError::NoToken => "attempted to access an inaccessible token".into(),
+            ShareError::DatabaseError(e) => e,
         }
     }
 }
@@ -103,6 +106,18 @@ impl From<DatabaseError> for String {
     }
 }
 
+impl std::fmt::Display for DatabaseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(&self.to_string())
+    }
+}
+
+impl From<DatabaseError> for ShareError {
+    fn from(err: DatabaseError) -> ShareError {
+        ShareError::DatabaseError(err.to_string())
+    }
+}
+
 /////  Data Structs  /////
 
 #[database("sqlite_shares")]
@@ -125,7 +140,8 @@ pub struct UrlID {
     #[serde(default)]
     expired: bool,
     ///The token that the custom url uses
-    token: String,
+    #[serde(default)]
+    token: Option<String>,
 }
 
 impl Default for UrlID {
@@ -136,7 +152,7 @@ impl Default for UrlID {
             crt: get_time_seconds(),
             url: String::default(),
             expired: bool::default(),
-            token: String::default(),
+            token: None,
         }
     }
 }
@@ -174,17 +190,33 @@ impl UrlID {
         &self.expired
     }
 
-    pub fn get_token(&self) -> &str {
-        &self.token
+
+    pub async fn generate_token(mut self, conn: &SharesDbConn) -> Result<UrlID, ShareError> {
+        if self.id.is_none() {
+            return Err(ShareError::IdError);
+        }
+        let token = base_10_to_62(self.id.expect("Id was none"), ALPHABET);
+        self.token = Some(normalize_length(token, TOKEN_MIN_LENGTH_CHARS, ALPHABET));
+        update_database(&conn, Search::Id(self.id.expect("Id was none")), self.clone()).await?;
+        Ok(self)
     }
 
-    pub fn get_id(&self) -> Option<i64> {
-        self.id
+    pub fn get_token(&self) -> Result<String, ShareError> {
+        if let Some(token) = &self.token {
+            return Ok(token.to_owned());
+        }
+        Err(ShareError::NoToken)
     }
 
-    pub fn get_shorten_url(&self) -> String {
-        //TODO make this return a proper URL, just not the token.
-        format!("http://127.0.0.1/{}", self.token)
+    pub fn get_shortened_link(&self) -> Result<String, ShareError> {
+        if self.token.is_none() {
+            return Err(ShareError::NoToken);
+        }
+        Ok(format!("http://{}/{}", crate::SERVER_DOMAIN, self.token.as_ref().unwrap()))
+    }
+
+    pub fn get_id(&self) -> &Option<i64> {
+        &self.id
     }
 }
 

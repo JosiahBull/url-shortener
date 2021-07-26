@@ -9,7 +9,7 @@ use database::*;
 use rocket::response::Redirect;
 
 //Configuration
-const SERVER_DOMAIN: &str = "127.0.0.1";
+const SERVER_DOMAIN: &str = "127.0.0.1:8000";
 
 /// Create a new shortened URL
 /// ```JSON
@@ -21,10 +21,11 @@ const SERVER_DOMAIN: &str = "127.0.0.1";
 #[post("/shorten", data = "<url_id>")]
 async fn create_shortened_url(url_id: UrlID, conn: SharesDbConn) -> Result<String, String> {
     let inserted: UrlID = add_to_database(&conn, url_id).await?;
-    // inserted.generate_id();
-    // update_database(&conn, database::Search::Id(inserted.get_id()), inserted);
-
-    Ok(inserted.get_shorten_url())
+    let inserted: UrlID = inserted.generate_token(&conn).await?;
+    match inserted.get_shortened_link() {
+        Ok(s) => return Ok(s),
+        Err(e) => return Err(e.to_string()),
+    }
 }
 
 ///Initally Setup the Db

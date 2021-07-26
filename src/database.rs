@@ -46,13 +46,13 @@ pub async fn setup(conn: &SharesDbConn) -> Result<(), DatabaseError> {
 }
 
 pub async fn add_to_database(conn: &SharesDbConn, data: UrlID) -> Result<UrlID, DatabaseError> {
-    let response: UrlID = conn.run(move |c| -> Result<UrlID, rusqlite::Error> {
+    let response: UrlID = conn.run(move |c| -> Result<UrlID, DatabaseError> {
         let tx = c.transaction().unwrap();
         tx.execute("
             INSERT INTO shares (exp, crt, url, expired, token)
             VALUES (?1, ?2, ?3, ?4, ?5);
         ", params![
-            data.get_exp(), data.get_crt(), data.get_dest_url(), data.is_expired(), data.get_token()
+            data.get_exp(), data.get_crt(), data.get_dest_url(), data.is_expired(), "".to_string()
         ]).expect("failed to create share in db!");
         let result_data: Vec<UrlID> = tx.prepare("SELECT * FROM shares ORDER BY id DESC LIMIT 1;")
         .and_then(|mut res: rusqlite::Statement| -> std::result::Result<Vec<UrlID>, rusqlite::Error> {
@@ -71,7 +71,7 @@ pub async fn add_to_database(conn: &SharesDbConn, data: UrlID) -> Result<UrlID, 
 
 pub async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<UrlID>, DatabaseError> {
     let result = conn.run(move |c| {
-        c.prepare(&format!("Select * FROM shares WHERE {}", search.get_search_term()))
+        c.prepare(&format!("Select * FROM shares WHERE {};", search.get_search_term()))
         .and_then(|mut res: rusqlite::Statement| -> std::result::Result<Vec<UrlID>, rusqlite::Error> {
             res.query_map([], |row| {
                 Ok(UrlID::from_database(row)?)
@@ -82,25 +82,26 @@ pub async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<
 }
 
 pub async fn update_database(conn: &SharesDbConn, search: Search, new_share: UrlID) -> Result<(), DatabaseError> {
-    let search_result = search.find_share(conn).await?;
+    let search_result: UrlID = search.find_share(conn).await?;
     conn.run(move |c| {
         //SAFTEY: As we are searching by ID to update a share, we shouldn't ever update more than one UrlID at a time.
         c.execute("
             UPDATE shares
-            SET exp = ?1
-                crt = ?2
-                url = ?3
-                expired = ?4
+            SET exp = ?1,
+                crt = ?2,
+                url = ?3,
+                expired = ?4,
                 token = ?5
             WHERE
                 id = ?6
+            LIMIT 1;
         ", params![
             new_share.get_exp(), 
             new_share.get_crt(), 
             new_share.get_dest_url(), 
             new_share.is_expired(), 
-            new_share.get_token(), 
-            search_result.get_id() //Assume the first result we got from the search is the one the user was requesting. This could be improved - maybe force ID-only search?
+            new_share.get_token().unwrap(), 
+            search_result.get_id().unwrap()
         ])
     }).await?;
     Ok(())
