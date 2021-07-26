@@ -8,21 +8,23 @@ use rand::Rng;
 
 //// Helper Functions (mostly for url generation) ////
 
-///A 36-char alphabet, which is used for our base conversion into the shortened url. Note that this could be improved to base 62 by adding extra upper case chars if needed!
-const ALPHABET: &[char] = &['0', '1', '2', '3', '4', '5', '6','7','8','9','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z'];
+///A 62-char alphabet, which is used for our base conversion into the shortened url.
+const ALPHABET: &[char] = &['0', '1', '2', '3', '4', '5', '6','7','8','9','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
+const TOKEN_MIN_LENGTH_CHARS: usize = 6;
 
+///Generate a token for the url link
 fn get_token(id: i64) -> String {
-    let mut token = base_10_to_36(id, ALPHABET);
-    
-    token = apply_shift(token, ALPHABET, 5, 50);
+    let mut token = base_10_to_62(id, ALPHABET);
+    token = normalize_length(token, TOKEN_MIN_LENGTH_CHARS, ALPHABET);
     token
 }   
 
-fn base_10_to_36(mut id: i64, alphabet: &[char]) -> String {
-        //Converting from base 10 (id), to base 36.
+///Convert a base 10 number to a base 62 number
+fn base_10_to_62(mut id: i64, alphabet: &[char]) -> String {
+        //Converting from base 10 (id), to base 62.
         let mut result: String = String::default();
         loop {
-            result.insert(0, alphabet[(id % 36) as usize]);
+            result.insert(0, alphabet[(id % 62) as usize]);
             id = id/36;
             if id <= 1 {
                 break;
@@ -31,45 +33,15 @@ fn base_10_to_36(mut id: i64, alphabet: &[char]) -> String {
         result
 }
 
-fn get_char_position(letter: char, alphabet: &[char]) -> i64 {
-    let mut counter: i64 = 0;
-    for comp in alphabet.iter() {
-        if letter == *comp {
-            return counter;
-        }
-        counter += 1;
-    }
-    panic!("Finding char position failed!");
-}
-///When passed to the add_with_overflow function, determines what action it should take in the event of an overflow.
-#[derive(PartialEq, Eq)]
-enum OverflowStatus {
-    OverFlowToZero,
-    OverFlowToMin,
-}
-///Attempts to add two numbers together, with a limit. In the event the new number overflows the limit, carrys out some action as defined by the overflow status
-fn add_with_overflow(num: usize, num2: usize, lim: usize, overflow_to_zero: OverflowStatus) -> usize {
-    let full_addition = num + num2;
-    if full_addition <= lim {
-        return full_addition;
-    }
-    if overflow_to_zero == OverflowStatus::OverFlowToZero {
-        return full_addition - lim;
-    }
-    return std::usize::MIN + full_addition - lim;
-}
-///Apply a shift in each char of a generated url, creating some randomness.
-fn apply_shift(input: String, alphabet: &[char], shift_min: usize, shift_max: usize) -> String {
-    let mut result = String::default();
-    let mut counter = 0;
+///Add extra length to a string if it doesn't meet the minimum length 
+fn normalize_length(mut input: String, min_length: usize, alphabet: &[char]) -> String {
     let mut rng = rand::thread_rng();
-    for curr in input.chars() {
-        let pos = get_char_position(curr, alphabet);
-        let new_pos = add_with_overflow(pos as usize, rng.gen_range(shift_min..shift_max+1), 36, OverflowStatus::OverFlowToZero);
-        counter += 1;
-        result.push(alphabet[new_pos as usize])
+    if input.len() < min_length {
+        for i in 0..(input.len()-min_length+1) {
+            input.push(alphabet[rng.gen_range(0..63)]);
+        }
     }
-    result
+    input
 }
 
 
