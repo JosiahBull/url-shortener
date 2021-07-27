@@ -1,6 +1,11 @@
 //! Functions and structs needed for interaction with the sqlite database.
-use crate::url_id::{UrlIDError, SharesDbConn, UrlID};
+use crate::url_id::{UrlIDError, UrlID};
 use rocket_sync_db_pools::rusqlite::{self, params};
+use rocket_sync_db_pools::database;
+
+#[database("sqlite_shares")]
+#[doc(hidden)]
+pub struct SharesDbConn(rusqlite::Connection);
 
 ///An enum representing the database error states
 #[derive(Debug)]

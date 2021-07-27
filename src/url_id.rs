@@ -1,11 +1,12 @@
+//! The url id share, representing a valid shortened url object, and all information related to it.
 use rocket::outcome::Outcome::*;
 use crate::common::*;
+use crate::database::{SharesDbConn, Search, update_database};
 use rocket::data::{self, Data, FromData, ToByteUnit};
-use rocket_sync_db_pools::{rusqlite, database};
+use rocket_sync_db_pools::rusqlite;
 use rocket::http::{Status, ContentType};
 use serde::{Serialize, Deserialize};
 use rand::Rng;
-use crate::database::*;
 
 //// Helper Functions (mostly for url generation) ////
 
@@ -97,9 +98,6 @@ impl std::fmt::Display for UrlIDError {
 }
 
 /////  Data Structs  /////
-
-#[database("sqlite_shares")]
-pub struct SharesDbConn(rusqlite::Connection);
 
 ///A new url id before it gets transformed to a UrlId internally, only used when parsing from Json.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
