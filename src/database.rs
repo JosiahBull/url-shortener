@@ -1,6 +1,5 @@
 use crate::structs::{DatabaseError, SharesDbConn, UrlID};
 use rocket_sync_db_pools::rusqlite::{self, params};
-//Only use tokio in dev mode to run async tests
 
 pub enum Search {
     Id(i64),
@@ -69,7 +68,7 @@ pub async fn add_to_database(conn: &SharesDbConn, data: UrlID) -> Result<UrlID, 
     Ok(response)
 }
 
-pub async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<UrlID>, DatabaseError> {
+async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<UrlID>, DatabaseError> {
     let result = conn.run(move |c| {
         c.prepare(&format!("Select * FROM shares WHERE {};", search.get_search_term()))
         .and_then(|mut res: rusqlite::Statement| -> std::result::Result<Vec<UrlID>, rusqlite::Error> {
@@ -82,11 +81,11 @@ pub async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<
 }
 
 pub async fn update_database(conn: &SharesDbConn, search: Search, new_share: UrlID) -> Result<(), DatabaseError> {
-    let search_result: UrlID = match search.find_share(conn).await? {
+    let search_result = match search.find_share(conn).await? {
         Some(s) => s,
-        None => return Err(DatabaseError::A("No share available!".into())),
+        None => return Err(DatabaseError::DoesNotExist),
     };
-
+    
     conn.run(move |c| {
         //SAFTEY: As we are searching by ID to update a share, we shouldn't ever update more than one UrlID at a time.
         c.execute("
@@ -114,7 +113,7 @@ pub async fn update_database(conn: &SharesDbConn, search: Search, new_share: Url
 pub async fn remove_from_database(conn: &SharesDbConn, search: Search) -> Result<(), DatabaseError> {
     let search_result = match search.find_share(conn).await? {
         Some(s) => s,
-        None => return Err(DatabaseError::A("No share available!".into())),
+        None => return Err(DatabaseError::DoesNotExist),
     };
     conn.run(move |c| {
         c.execute("

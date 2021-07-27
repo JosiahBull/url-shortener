@@ -87,20 +87,29 @@ impl std::fmt::Display for ShareError {
 
 #[derive(Debug)]
 pub enum DatabaseError {
-    A(String)
+    ShareError(ShareError),
+    DoesNotExist,
+    UnableToContact,
+    SqlError(String),
+    InsertError(String),
 }
 
 impl From<rusqlite::Error> for DatabaseError {
     fn from(error: rusqlite::Error) -> DatabaseError {
-        DatabaseError::A(error.to_string())
+        DatabaseError::SqlError(error.to_string())
     }
 }
 
 
 impl From<DatabaseError> for String {
     fn from(err: DatabaseError) -> String {
-        match err {
-            DatabaseError::A(s) => return format!("Database Error: {}", s)
+        return match err {
+            // DatabaseError::A(s) => return format!("Database Error: {}", s)
+            DatabaseError::DoesNotExist => format!("not found in database"),
+            DatabaseError::ShareError(s) => format!("a problem occured with a share when interacting with the database: {}", s.to_string()),
+            DatabaseError::UnableToContact => format!("failed to connect to the database"),
+            DatabaseError::SqlError(s) => format!("an sql error occured when interfacing with the database: {}", s),
+            DatabaseError::InsertError(s) => format!("an error occured attempting to add a new share to the databse: {}", s),
         } 
     }
 }
@@ -122,24 +131,26 @@ impl From<DatabaseError> for ShareError {
 #[database("sqlite_shares")]
 pub struct SharesDbConn(rusqlite::Connection);
 
-/// This struct represents a valid url ID
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+struct NewUrlID {
+    url: String,
+    exp: Option<i64>
+}
+
+/// This struct represents a valid url ID
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UrlID {
     ///ID
     id: Option<i64>,
     /// When this url expires
-    #[serde(default)]
     exp: i64,
     /// When this url was created
-    #[serde(default)]
     crt: i64,
     /// Url this redirects to
     url: String,
     /// Has this token expired
-    #[serde(default)]
     expired: bool,
     ///The token that the custom url uses
-    #[serde(default)]
     token: Option<String>,
 }
 
@@ -255,12 +266,18 @@ impl<'r> FromData<'r> for UrlID {
         let string = rocket::request::local_cache!(req, string);
 
         // Attempt to parse the string with serde into our struct
-        let share: UrlID = match serde_json::from_str(string) {
+        let share: NewUrlID = match serde_json::from_str(string) {
             Ok(share) => share,
             Err(e) => return Failure((Status::BadRequest, ShareError::ParseFailure(e.to_string()))),
         };
 
-        Success(share)
+        let mut result = UrlID::default();
+        result.url = share.url;
+        if let Some(set_exp) = share.exp {
+            result.exp = set_exp;
+        }
+
+        Success(result)
     }
 }
 
