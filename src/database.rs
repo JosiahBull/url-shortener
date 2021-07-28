@@ -3,8 +3,9 @@ use crate::url_id::{UrlIDError, UrlID};
 use rocket_sync_db_pools::rusqlite::{self, params};
 use rocket_sync_db_pools::database;
 
-#[database("sqlite_shares")]
 #[doc(hidden)]
+#[database("sqlite_shares")]
+///A shared database 
 pub struct SharesDbConn(rusqlite::Connection);
 
 ///An enum representing the database error states
@@ -53,6 +54,12 @@ impl std::fmt::Display for DatabaseError {
 impl From<DatabaseError> for UrlIDError {
     fn from(err: DatabaseError) -> UrlIDError {
         UrlIDError::DatabaseError(err.to_string())
+    }
+}
+
+impl std::convert::From<DatabaseError> for (rocket::http::Status, std::string::String) {
+    fn from(err: DatabaseError) -> (rocket::http::Status, std::string::String) {
+        (rocket::http::Status::new(500), err.to_string())
     }
 }
 

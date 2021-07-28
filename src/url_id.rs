@@ -213,6 +213,18 @@ impl UrlID {
     }
 }
 
+impl std::convert::From<UrlIDError> for (rocket::http::Status, std::string::String) {
+    fn from(err: UrlIDError) -> (rocket::http::Status, std::string::String) {
+        // (rocket::http::Status::new(500), err.to_string())
+        match err {
+            UrlIDError::ServerError(e) => (rocket::http::Status::new(500), e),
+            UrlIDError::DatabaseError(e) => (rocket::http::Status::new(500), e),
+            UrlIDError::ParseFailure(e) => (rocket::http::Status::new(500), e),
+            _ => (rocket::http::Status::new(400), "Bad Request".into()),
+        }
+    }
+}
+
 impl crate::database::FromDatabase for UrlID {
     type Error = rusqlite::Error;
     fn from_database(row: &rusqlite::Row<'_> ) -> Result<UrlID, rusqlite::Error> {
@@ -261,4 +273,3 @@ impl<'r> FromData<'r> for UrlID {
         })
     }
 }
-
