@@ -1,5 +1,5 @@
 //! Functions and structs needed for interaction with the sqlite database.
-use crate::url_id::{UrlIDError, UrlID};
+use crate::url_id::{UrlIDError, UrlID, UncommittedUrlID};
 use rocket_sync_db_pools::rusqlite::{self, params};
 use rocket_sync_db_pools::database;
 
@@ -24,11 +24,9 @@ impl From<rusqlite::Error> for DatabaseError {
     }
 }
 
-
 impl From<DatabaseError> for String {
     fn from(err: DatabaseError) -> String {
         return match err {
-            // DatabaseError::A(s) => return format!("Database Error: {}", s)
             DatabaseError::DoesNotExist => "not found in database".to_string(),
             DatabaseError::UrlIDError(s) => format!("a problem occured with a share when interacting with the database: {}", s.to_string()),
             DatabaseError::UnableToContact => "failed to connect to the database".to_string(),
@@ -41,7 +39,6 @@ impl From<DatabaseError> for String {
 impl std::fmt::Display for DatabaseError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            // DatabaseError::A(s) => return format!("Database Error: {}", s)
             DatabaseError::DoesNotExist => f.write_str("not found in database"),
             DatabaseError::UrlIDError(s) => f.write_str(&format!("a problem occured with a share when interacting with the database: {}", s.to_string())),
             DatabaseError::UnableToContact => f.write_str("failed to connect to the database"),
@@ -68,7 +65,6 @@ pub enum Search {
     Id(i64),
     #[allow(dead_code)]
     Url(String),
-    Token(String),
 }
 
 impl Search {
@@ -78,7 +74,6 @@ impl Search {
         match self {
             Search::Id(s) => format!("{} = {}", "id", s),
             Search::Url(s) => format!("{} = '{}'", "url", s),
-            Search::Token(s) => format!("{} = '{}'", "token", s),
         }
     }
     ///Run a search, returns the first result it finds in the database, or a DatabaseError if something goes wrong.
@@ -104,23 +99,21 @@ pub async fn setup(conn: &SharesDbConn) -> Result<(), DatabaseError> {
             id INTEGER PRIMARY KEY,
             exp BIGINT NOT NULL,
             crt BIGINT INT NOT NULL,
-            url TEXT NOT NULL,
-            expired BOOLEAN NOT NULL,
-            token TEXT
+            url TEXT NOT NULL
         );", [])
     }).await?;
     Ok(())
 }
 
 ///Attempts to add a new share to the database. If successful, will return the added share (importantly) with an ID!
-pub async fn add_to_database(conn: &SharesDbConn, data: UrlID) -> Result<UrlID, DatabaseError> {
+pub async fn add_to_database(conn: &SharesDbConn, data: UncommittedUrlID) -> Result<UrlID, DatabaseError> {
     let response: UrlID = conn.run(move |c| -> Result<UrlID, DatabaseError> {
         let tx = c.transaction().unwrap();
         tx.execute("
-            INSERT INTO shares (exp, crt, url, expired, token)
-            VALUES (?1, ?2, ?3, ?4, ?5);
+            INSERT INTO shares (exp, crt, url)
+            VALUES (?1, ?2, ?3);
         ", params![
-            data.get_exp(), data.get_crt(), data.get_dest_url(), data.is_expired(), "".to_string()
+            data.get_exp(), data.get_crt(), data.get_dest_url()
         ]).expect("failed to create share in db!");
         let result_data: Vec<UrlID> = tx.prepare("SELECT * FROM shares ORDER BY id DESC LIMIT 1;")
         .and_then(|mut res: rusqlite::Statement| -> std::result::Result<Vec<UrlID>, rusqlite::Error> {
@@ -163,9 +156,7 @@ pub async fn update_database(conn: &SharesDbConn, search: Search, new_share: Url
             UPDATE shares
             SET exp = ?1,
                 crt = ?2,
-                url = ?3,
-                expired = ?4,
-                token = ?5
+                url = ?3
             WHERE
                 id = ?6
             ;
@@ -173,9 +164,7 @@ pub async fn update_database(conn: &SharesDbConn, search: Search, new_share: Url
             new_share.get_exp(), 
             new_share.get_crt(), 
             new_share.get_dest_url(), 
-            new_share.is_expired(), 
-            new_share.get_token().unwrap(), //TODO
-            search_result.get_id().unwrap() //TODO
+            search_result.get_id()
         ])
     }).await?;
     Ok(())

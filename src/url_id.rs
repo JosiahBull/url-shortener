@@ -1,7 +1,7 @@
 //! The url id share, representing a valid shortened url object, and all information related to it.
 use rocket::outcome::Outcome::*;
 use crate::common::*;
-use crate::database::{SharesDbConn, Search, update_database};
+use crate::database::{SharesDbConn};
 use rocket::data::{self, Data, FromData, ToByteUnit};
 use rocket_sync_db_pools::rusqlite;
 use rocket::http::{Status, ContentType};
@@ -11,26 +11,67 @@ use rand::Rng;
 //// Helper Functions (mostly for url generation) ////
 
 ///A 62-char alphabet, which is used for our base conversion into the shortened url.
-const ALPHABET: &[char] = &['0', '1', '2', '3', '4', '5', '6','7','8','9','a','b','c','d','e','f','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
+pub const ALPHABET: &[char] = &['0', '1', '2', '3', '4', '5', '6','7','8','9','a','b','c','d','e','f','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
 
 ///The minimum length of a token, in chars. We will automatically add further chars to reach this length on the url.
 const TOKEN_MIN_LENGTH_CHARS: usize = 6;
 
 ///The delim char between the "real" number, and the fake.
-const DELIM_CHAR: char = 'g';
+pub const DELIM_CHAR: char = 'g';
 
-///Convert a base 10 number to a base 62 number
-fn base_10_to_62(mut id: i64, alphabet: &[char]) -> String {
-        //Converting from base 10 (id), to base 62.
-        let mut result: String = String::default();
-        loop {
-            result.insert(0, alphabet[(id % 62) as usize]);
-            id /= 36;
-            if id <= 1 {
-                break;
-            }
+///The base being used for conversion
+const BASE: usize = 61;
+
+///Convert a base 10 number to a base 61 number
+fn base_10_to_61(mut id: i64, alphabet: &[char]) -> String {
+    //Converting from base 10 (id), to base 61.
+    let mut result: String = String::default();
+    loop {
+        result.insert(0, alphabet[(id % BASE as i64) as usize]);
+        id /= BASE as i64;
+        if id < 1 {
+            break;
         }
-        result
+    }
+    result
+}
+
+///Find position of a char in a string, panics upon failure to find the given char.
+fn get_char_position(letter: char, alphabet: &[char]) -> i64 {
+    let mut counter: i64 = 0;
+    // println!("Looking for : '{}' in : '{:?}'", letter, alphabet);
+    for comp in alphabet.iter() {
+        if letter == *comp {
+            return counter;
+        }
+        counter += 1;
+    }
+    panic!("Finding char position failed!");
+}
+
+///Convert a base 61 number to a base 10 number
+pub fn base_61_to_10(token: String, alpha: &[char]) -> i64 {
+    let mut result = 0;
+    let mut counter = 0;
+    loop {
+        // println!("{}", token);
+        result = BASE as i64 * result + get_char_position(token.chars().nth(counter).unwrap(), alpha);
+        counter += 1;
+        if counter >= token.len() {
+            break;
+        }
+    }
+    result
+}
+
+#[test]
+fn test_base_conversion() {
+    let input_max = 1000;
+    for i in 0..input_max {
+        let token: String = base_10_to_61(i, ALPHABET);
+        let id: i64 = base_61_to_10(token.clone(), ALPHABET);
+        assert_eq!(i, id);
+    }
 }
 
 ///Add extra length to a string if it doesn't meet the minimum length 
@@ -39,7 +80,7 @@ fn normalize_length(mut input: String, min_length: usize, alphabet: &[char], del
     if input.len() < min_length {
         input.push(delim);
         for _ in 0..(min_length-input.len()) {
-            input.push(alphabet[rng.gen_range(0..62)]);
+            input.push(alphabet[rng.gen_range(0..BASE)]);
         }
     }
     input
@@ -103,39 +144,54 @@ impl std::fmt::Display for UrlIDError {
 
 /////  Data Structs  /////
 
-///A new url id before it gets transformed to a UrlId internally, only used when parsing from Json.
+///A UrlId before it has been committed to the database.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-struct NewUrlID {
+pub struct UncommittedUrlID {
     url: String,
-    exp: Option<i64>
+    exp: Option<i64>,
+    crt: Option<i64>
+}
+
+impl UncommittedUrlID {
+    pub async fn commit(self, conn: &SharesDbConn) -> Result<UrlID, UrlIDError> {
+        Ok(crate::database::add_to_database(conn, self).await?)
+    }
+    ///Get the destination url of this shortened link. 
+    pub fn get_dest_url(&self) -> &str {
+        &self.url
+    }
+    
+    ///Get the time that this shortened link will expire.
+    pub fn get_exp(&self) -> i64 {
+        self.exp.unwrap()
+    }
+
+    ///Get the time this shortened link was created.
+    pub fn get_crt(&self) -> i64 {
+        self.crt.unwrap()
+    }
 }
 
 /// This struct represents a valid url ID
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UrlID {
     ///ID
-    id: Option<i64>,
+    id: i64,
     /// When this url expires
     exp: i64,
     /// When this url was created
     crt: i64,
     /// Url this redirects to
     url: String,
-    /// Has this token expired
-    expired: bool,
-    ///The token that the custom url uses
-    token: Option<String>,
 }
 
 impl Default for UrlID {
     fn default() -> Self {
         UrlID {
-            id: None,
+            id: std::i64::MAX,
             exp: std::i64::MAX,
             crt: get_time_seconds(),
             url: String::default(),
-            expired: bool::default(),
-            token: None,
         }
     }
 }
@@ -157,13 +213,6 @@ impl UrlID {
         self
     }
 
-    ///Set the destination url of this shortened link. Can be chained with other sets.
-    #[allow(dead_code)]
-    pub fn set_dest_url(mut self, url: &str) -> Self {
-        self.url = url.to_owned();
-        self
-    }
-
     ///Get the destination url of this shortened link. 
     pub fn get_dest_url(&self) -> &str {
         &self.url
@@ -179,40 +228,19 @@ impl UrlID {
         &self.crt
     }
 
-    ///A boolean representing whether or not this shortened link has expired.
-    pub fn is_expired(&self) -> &bool {
-        &self.expired
-    }
-
     ///Generates the unique identifier representing this shortened url. Can be chained with other requests, though this borrows mutably unlike others. 
-    pub async fn generate_token(mut self, conn: &SharesDbConn) -> Result<UrlID, UrlIDError> {
-        if self.id.is_none() {
-            return Err(UrlIDError::IdError);
-        }
-        let token = base_10_to_62(self.id.expect("Id was none"), ALPHABET);
-        self.token = Some(normalize_length(token, TOKEN_MIN_LENGTH_CHARS, ALPHABET, DELIM_CHAR));
-        update_database(&conn, Search::Id(self.id.expect("Id was none")), self.clone()).await?;
-        Ok(self)
-    }
-
-    ///Get the unique token representing this url.
-    pub fn get_token(&self) -> Result<String, UrlIDError> {
-        if let Some(token) = &self.token {
-            return Ok(token.to_owned());
-        }
-        Err(UrlIDError::NoToken)
+    pub fn generate_token(&self) -> String {
+        let token = base_10_to_61(self.id, ALPHABET);
+        normalize_length(token, TOKEN_MIN_LENGTH_CHARS, ALPHABET, DELIM_CHAR)
     }
 
     ///Get the shortened link associated with this URL. May create an error if the token has not been generated yet.
-    pub fn get_shortened_link(&self) -> Result<String, UrlIDError> {
-        if self.token.is_none() {
-            return Err(UrlIDError::NoToken);
-        }
-        Ok(format!("http://{}/{}", crate::SERVER_DOMAIN, self.token.as_ref().unwrap()))
+    pub fn get_shortened_link(&self) -> String {
+        format!("http://{}/{}", crate::SERVER_DOMAIN, self.generate_token())
     }
 
     ///Get the ID associated with this shortened url.
-    pub fn get_id(&self) -> &Option<i64> {
+    pub fn get_id(&self) -> &i64 {
         &self.id
     }
 }
@@ -234,18 +262,16 @@ impl crate::database::FromDatabase for UrlID {
     fn from_database(row: &rusqlite::Row<'_> ) -> Result<UrlID, rusqlite::Error> {
         //SAFTEY: These should be safe, as the types with unwraps are disallowed from being null in the schema of the db.
         Ok(UrlID {
-            id: row.get(0).unwrap_or(None),
+            id: row.get(0).unwrap(),
             exp: row.get(1).unwrap(),
             crt: row.get(2).unwrap(),
             url: row.get(3).unwrap(),
-            expired: row.get(4).unwrap(),
-            token: row.get(5).unwrap(),
         })
     }
 }
 
 #[rocket::async_trait]
-impl<'r> FromData<'r> for UrlID {
+impl<'r> FromData<'r> for UncommittedUrlID {
     type Error = UrlIDError;
     async fn from_data(req: &'r rocket::request::Request<'_>, data: Data<'r>) -> data::Outcome<'r, Self> {
         //Ensure correct content type
@@ -265,15 +291,14 @@ impl<'r> FromData<'r> for UrlID {
         let string = rocket::request::local_cache!(req, string);
 
         // Attempt to parse the string with serde into our struct
-        let share: NewUrlID = match serde_json::from_str(string) {
+        let mut share: UncommittedUrlID = match serde_json::from_str(string) {
             Ok(share) => share,
             Err(e) => return Failure((Status::BadRequest, UrlIDError::ParseFailure(e.to_string()))),
         };
-
-        Success(UrlID {
-            url: share.url,
-            exp: share.exp.unwrap_or(std::i64::MAX), //Note it's not very idomatic to have this defined in multiple places (both here and default), might pay to wrap in enum then reuse?
-            .. Default::default()
-        })
+        if share.exp.is_none() {
+            share.exp = Some(std::i64::MAX) //Note it's not very idomatic to have this defined in multiple places (both here and default), might pay to wrap in enum then reuse?
+        }
+        share.crt = Some(get_time_seconds());
+        Success(share)
     }
 }
