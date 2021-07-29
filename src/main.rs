@@ -22,26 +22,23 @@ const SERVER_DOMAIN: &str = "127.0.0.1:8000";
 /// }
 /// ```
 #[post("/shorten", data = "<url_id>")]
-async fn create_shortened_url(url_id: UrlID, conn: SharesDbConn) -> Result<String, (Status, String)> {
+async fn create_shortened_url(url_id: UncommittedUrlID, conn: SharesDbConn) -> Result<String, (Status, String)> {
     let inserted: UrlID = add_to_database(&conn, url_id).await?;
-    let inserted: UrlID = inserted.generate_token(&conn).await?;
-    match inserted.get_shortened_link() {
-        Ok(s) => Ok(s),
-        Err(e) => Err((Status::new(500), e.to_string())),
-    }
+    Ok(inserted.get_shortened_link())
 }
 
 ///Making a GET request to this endpoint will create the table in the database automatically if it hasn't been created already.
 #[get("/setup")]
-async fn setup_db(conn: SharesDbConn) -> Result<String, String> {
+async fn setup_db(conn: SharesDbConn) -> Result<String, (Status, String)> {
     database::setup(&conn).await?;
     Ok("Success".into())
 }
 
 ///This should be the most commonly used endpoint, and will redirect a user to the correct page the url shortens to!
 #[get("/<token>")]
-async fn get_page(token: String, conn: SharesDbConn) -> Result<Option<Redirect>, String> { 
-    let search_result = Search::Token(token).find_share(&conn).await?;
+async fn get_page(token: String, conn: SharesDbConn) -> Result<Option<Redirect>, (Status, String)> { 
+    let converted_id: String = token.split(url_id::DELIM_CHAR).collect::<Vec<&str>>()[0].to_owned();
+    let search_result = Search::Id(base_61_to_10(converted_id, url_id::ALPHABET)).find_share(&conn).await?;
     if search_result.is_none() {
         return Ok(None)
     }
