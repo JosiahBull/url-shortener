@@ -144,6 +144,7 @@ async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<UrlI
 }
 
 ///Update an element in the database, replacing it with a new element.
+#[allow(dead_code)]
 pub async fn update_database(conn: &SharesDbConn, search: Search, new_share: UrlID) -> Result<(), DatabaseError> {
     let search_result = match search.find_share(conn).await? {
         Some(s) => s,

@@ -1,7 +1,6 @@
 //! The url id share, representing a valid shortened url object, and all information related to it.
 use rocket::outcome::Outcome::*;
 use crate::common::*;
-use crate::database::{SharesDbConn};
 use rocket::data::{self, Data, FromData, ToByteUnit};
 use rocket_sync_db_pools::rusqlite;
 use rocket::http::{Status, ContentType};
@@ -38,13 +37,10 @@ fn base_10_to_61(mut id: i64, alphabet: &[char]) -> String {
 
 ///Find position of a char in a string, panics upon failure to find the given char.
 fn get_char_position(letter: char, alphabet: &[char]) -> i64 {
-    let mut counter: i64 = 0;
-    // println!("Looking for : '{}' in : '{:?}'", letter, alphabet);
-    for comp in alphabet.iter() {
+    for (counter, comp) in alphabet.iter().enumerate() {
         if letter == *comp {
-            return counter;
+            return counter as i64;
         }
-        counter += 1;
     }
     panic!("Finding char position failed!");
 }
@@ -54,7 +50,6 @@ pub fn base_61_to_10(token: String, alpha: &[char]) -> i64 {
     let mut result = 0;
     let mut counter = 0;
     loop {
-        // println!("{}", token);
         result = BASE as i64 * result + get_char_position(token.chars().nth(counter).unwrap(), alpha);
         counter += 1;
         if counter >= token.len() {
@@ -153,9 +148,6 @@ pub struct UncommittedUrlID {
 }
 
 impl UncommittedUrlID {
-    pub async fn commit(self, conn: &SharesDbConn) -> Result<UrlID, UrlIDError> {
-        Ok(crate::database::add_to_database(conn, self).await?)
-    }
     ///Get the destination url of this shortened link. 
     pub fn get_dest_url(&self) -> &str {
         &self.url
@@ -213,16 +205,19 @@ impl UrlID {
         self
     }
 
+    #[allow(dead_code)]
     ///Get the destination url of this shortened link. 
     pub fn get_dest_url(&self) -> &str {
         &self.url
     }
-    
+
+    #[allow(dead_code)]
     ///Get the time that this shortened link will expire.
     pub fn get_exp(&self) -> &i64 {
         &self.exp
     }
 
+    #[allow(dead_code)]
     ///Get the time this shortened link was created.
     pub fn get_crt(&self) -> &i64 {
         &self.crt

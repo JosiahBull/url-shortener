@@ -29,7 +29,7 @@ async fn create_shortened_url(url_id: UncommittedUrlID, conn: SharesDbConn) -> R
 
 ///Making a GET request to this endpoint will create the table in the database automatically if it hasn't been created already.
 #[get("/setup")]
-async fn setup_db(conn: SharesDbConn) -> Result<String, String> {
+async fn setup_db(conn: SharesDbConn) -> Result<String, (Status, String)> {
     database::setup(&conn).await?;
     Ok("Success".into())
 }
