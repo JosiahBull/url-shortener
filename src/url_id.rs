@@ -11,10 +11,13 @@ use rand::Rng;
 //// Helper Functions (mostly for url generation) ////
 
 ///A 62-char alphabet, which is used for our base conversion into the shortened url.
-const ALPHABET: &[char] = &['0', '1', '2', '3', '4', '5', '6','7','8','9','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
+const ALPHABET: &[char] = &['0', '1', '2', '3', '4', '5', '6','7','8','9','a','b','c','d','e','f','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
 
 ///The minimum length of a token, in chars. We will automatically add further chars to reach this length on the url.
-const TOKEN_MIN_LENGTH_CHARS: usize = 4;
+const TOKEN_MIN_LENGTH_CHARS: usize = 6;
+
+///The delim char between the "real" number, and the fake.
+const DELIM_CHAR: char = 'g';
 
 ///Convert a base 10 number to a base 62 number
 fn base_10_to_62(mut id: i64, alphabet: &[char]) -> String {
@@ -31,10 +34,11 @@ fn base_10_to_62(mut id: i64, alphabet: &[char]) -> String {
 }
 
 ///Add extra length to a string if it doesn't meet the minimum length 
-fn normalize_length(mut input: String, min_length: usize, alphabet: &[char]) -> String {
+fn normalize_length(mut input: String, min_length: usize, alphabet: &[char], delim: char) -> String {
     let mut rng = rand::thread_rng();
     if input.len() < min_length {
-        for _ in 0..(min_length-input.len()+1) {
+        input.push(delim);
+        for _ in 0..(min_length-input.len()) {
             input.push(alphabet[rng.gen_range(0..62)]);
         }
     }
@@ -186,7 +190,7 @@ impl UrlID {
             return Err(UrlIDError::IdError);
         }
         let token = base_10_to_62(self.id.expect("Id was none"), ALPHABET);
-        self.token = Some(normalize_length(token, TOKEN_MIN_LENGTH_CHARS, ALPHABET));
+        self.token = Some(normalize_length(token, TOKEN_MIN_LENGTH_CHARS, ALPHABET, DELIM_CHAR));
         update_database(&conn, Search::Id(self.id.expect("Id was none")), self.clone()).await?;
         Ok(self)
     }
