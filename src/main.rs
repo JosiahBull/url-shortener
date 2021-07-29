@@ -7,6 +7,7 @@ mod database;
 use url_id::*;
 use database::*;
 use rocket::response::Redirect;
+use rocket::http::Status;
 
 //Configuration
 ///The IP address of this server, should be set to your domain or IP.
@@ -21,12 +22,12 @@ const SERVER_DOMAIN: &str = "127.0.0.1:8000";
 /// }
 /// ```
 #[post("/shorten", data = "<url_id>")]
-async fn create_shortened_url(url_id: UrlID, conn: SharesDbConn) -> Result<String, String> {
+async fn create_shortened_url(url_id: UrlID, conn: SharesDbConn) -> Result<String, (Status, String)> {
     let inserted: UrlID = add_to_database(&conn, url_id).await?;
     let inserted: UrlID = inserted.generate_token(&conn).await?;
     match inserted.get_shortened_link() {
         Ok(s) => Ok(s),
-        Err(e) => Err(e.to_string()),
+        Err(e) => Err((Status::new(500), e.to_string())),
     }
 }
 

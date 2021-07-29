@@ -1,11 +1,12 @@
+//! The url id share, representing a valid shortened url object, and all information related to it.
 use rocket::outcome::Outcome::*;
 use crate::common::*;
+use crate::database::{SharesDbConn, Search, update_database};
 use rocket::data::{self, Data, FromData, ToByteUnit};
-use rocket_sync_db_pools::{rusqlite, database};
+use rocket_sync_db_pools::rusqlite;
 use rocket::http::{Status, ContentType};
 use serde::{Serialize, Deserialize};
 use rand::Rng;
-use crate::database::*;
 
 //// Helper Functions (mostly for url generation) ////
 
@@ -97,9 +98,6 @@ impl std::fmt::Display for UrlIDError {
 }
 
 /////  Data Structs  /////
-
-#[database("sqlite_shares")]
-pub struct SharesDbConn(rusqlite::Connection);
 
 ///A new url id before it gets transformed to a UrlId internally, only used when parsing from Json.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -215,6 +213,18 @@ impl UrlID {
     }
 }
 
+impl std::convert::From<UrlIDError> for (rocket::http::Status, std::string::String) {
+    fn from(err: UrlIDError) -> (rocket::http::Status, std::string::String) {
+        // (rocket::http::Status::new(500), err.to_string())
+        match err {
+            UrlIDError::ServerError(e) => (rocket::http::Status::new(500), e),
+            UrlIDError::DatabaseError(e) => (rocket::http::Status::new(500), e),
+            UrlIDError::ParseFailure(e) => (rocket::http::Status::new(500), e),
+            _ => (rocket::http::Status::new(400), "Bad Request".into()),
+        }
+    }
+}
+
 impl crate::database::FromDatabase for UrlID {
     type Error = rusqlite::Error;
     fn from_database(row: &rusqlite::Row<'_> ) -> Result<UrlID, rusqlite::Error> {
@@ -263,4 +273,3 @@ impl<'r> FromData<'r> for UrlID {
         })
     }
 }
-
