@@ -51,7 +51,7 @@ fn get_char_position(letter: char, alphabet: &[char]) -> i64 {
 }
 
 /// Convert a base 61 number to a base 10 number
-pub fn base_61_to_10(token: String, alpha: &[char]) -> i64 {
+pub fn base_61_to_10(token: &str, alpha: &[char]) -> i64 {
     let mut result = 0;
     let mut counter = 0;
     loop {
@@ -70,7 +70,7 @@ fn test_base_conversion() {
     let input_max = 1000;
     for i in 0..input_max {
         let token: String = base_10_to_61(i, ALPHABET);
-        let id: i64 = base_61_to_10(token.clone(), ALPHABET);
+        let id: i64 = base_61_to_10(&token, ALPHABET);
         assert_eq!(i, id);
     }
 }
@@ -263,9 +263,9 @@ impl std::convert::From<UrlIDError> for (rocket::http::Status, std::string::Stri
     }
 }
 
-impl crate::database::FromDatabase for UrlID {
+impl<'a> crate::database::FromDatabase<'a> for UrlID {
     type Error = rusqlite::Error;
-    fn from_database(row: &rusqlite::Row<'_>) -> Result<UrlID, rusqlite::Error> {
+    fn from_database(row: &'a rusqlite::Row<'a>) -> Result<UrlID, rusqlite::Error> {
         //SAFETY: These should be safe, as the types with unwraps are disallowed from being null in the schema of the db.
         Ok(UrlID {
             id: row.get(0).unwrap(),

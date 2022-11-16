@@ -1,5 +1,6 @@
 //! Functions and structs needed for interaction with the sqlite database.
 use crate::url_id::{UncommittedUrlID, UrlID, UrlIDError};
+use crate::users::{NewUser, User};
 use rocket_sync_db_pools::database;
 use rocket_sync_db_pools::rusqlite::{self, params};
 
@@ -96,7 +97,7 @@ impl Search {
     }
     ///Run a search, returns the first result it finds in the database, or a DatabaseError if something goes wrong.
     pub async fn find_share(self, conn: &SharesDbConn) -> Result<Option<UrlID>, DatabaseError> {
-        let search_result = search_database(conn, self).await?;
+        let search_result = search_share_database(conn, self).await?;
         if search_result.is_empty() {
             return Ok(None);
         }
@@ -105,9 +106,11 @@ impl Search {
 }
 
 /// Implementing a trait means that your struct can be parsed from a database row, or return an error.
-pub trait FromDatabase: Sized {
+pub trait FromDatabase<'a>: Sized {
     type Error: Send + std::fmt::Debug + Into<rocket_sync_db_pools::rusqlite::Error>;
-    fn from_database(data: &rocket_sync_db_pools::rusqlite::Row<'_>) -> Result<Self, Self::Error>;
+    fn from_database(
+        data: &'a rocket_sync_db_pools::rusqlite::Row<'a>,
+    ) -> Result<Self, Self::Error>;
 }
 
 /// Setup the database. Creates the table(s) required if they do not already exist in the database.db file.
@@ -115,11 +118,21 @@ pub async fn setup(conn: &SharesDbConn) -> Result<(), DatabaseError> {
     conn.run(|c| {
         c.execute(
             "CREATE TABLE IF NOT EXISTS shares (
-            id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             exp BIGINT NOT NULL,
             crt BIGINT INT NOT NULL,
             url TEXT NOT NULL
         );",
+            [],
+        )?;
+
+        c.execute(
+            "CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                password TEXT NOT NULL,
+                is_admin BOOLEAN NOT NULL
+            );",
             [],
         )
     })
@@ -128,7 +141,7 @@ pub async fn setup(conn: &SharesDbConn) -> Result<(), DatabaseError> {
 }
 
 /// Attempts to add a new share to the database. If successful, will return the added share (importantly) with an ID!
-pub async fn add_to_database(
+pub async fn add_share_to_database(
     conn: &SharesDbConn,
     data: UncommittedUrlID,
 ) -> Result<UrlID, DatabaseError> {
@@ -140,7 +153,7 @@ pub async fn add_to_database(
         ", params![
             data.get_exp(), data.get_crt(), data.get_dest_url()
         ]).expect("failed to create share in db!");
-        let result_data: Vec<UrlID> = tx.prepare("SELECT * FROM shares ORDER BY id DESC LIMIT 1;")
+        let mut result_data: Vec<UrlID> = tx.prepare("SELECT * FROM shares ORDER BY id DESC LIMIT 1;")
         .and_then(|mut res: rusqlite::Statement| -> std::result::Result<Vec<UrlID>, rusqlite::Error> {
             res.query_map([], |row| {
                 UrlID::from_database(row)
@@ -149,14 +162,59 @@ pub async fn add_to_database(
         tx.commit().unwrap();
         //TODO Implement error handling here, lots of unwrap statements which could panic. At min should be exchanged for expect statements, or preferably proper handling.
 
-        Ok(result_data[0].clone())
+        Ok(result_data.remove(0))
     }).await?;
 
     Ok(response)
 }
 
+pub async fn add_user_to_database<'a>(
+    conn: &SharesDbConn,
+    data: NewUser<'static>,
+) -> Result<User<'static>, DatabaseError> {
+    let response: User = conn.run(move |c| -> Result<User, DatabaseError> {
+        let tx = c.transaction().unwrap();
+        tx.execute("
+            INSERT INTO users (username, password, is_admin)
+            VALUES (?1, ?2, ?3);
+        ", params![
+            data.username, data.password, data.is_admin
+        ]).expect("failed to create user in db!");
+
+        let mut result_data: Vec<User> = tx.prepare("SELECT * FROM users ORDER BY id DESC LIMIT 1;")
+        .and_then(|mut res: rusqlite::Statement| -> std::result::Result<Vec<User>, rusqlite::Error> {
+            res.query_map([], |row| {
+                User::from_database(row)
+            }).unwrap().collect()
+        }).unwrap();
+
+        tx.commit().unwrap();
+
+        Ok(result_data.remove(0))
+    }).await?;
+
+    Ok(response)
+}
+
+/// Attempts to remove a share from the database, based on the ID of the share.
+pub async fn delete_share_from_database(conn: &SharesDbConn, id: i64) -> Result<(), DatabaseError> {
+    conn.run(move |c| c.execute("DELETE FROM shares WHERE id = ?1;", params![id]))
+        .await?;
+    Ok(())
+}
+
+/// Attempts to remove a user from the database, based on the ID of the user.
+pub async fn delete_user_from_database(conn: &SharesDbConn, id: i64) -> Result<(), DatabaseError> {
+    conn.run(move |c| c.execute("DELETE FROM users WHERE id = ?1;", params![id]))
+        .await?;
+    Ok(())
+}
+
 /// This is a non-public function, utilised by Search.find_share(). It will search a database, matching against criteria. It returns a vec of possible elements which may match the query.
-async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<UrlID>, DatabaseError> {
+async fn search_share_database(
+    conn: &SharesDbConn,
+    search: Search,
+) -> Result<Vec<UrlID>, DatabaseError> {
     let result = conn
         .run(move |c| {
             c.prepare(&format!(
@@ -177,7 +235,7 @@ async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<UrlI
 
 /// Update an element in the database, replacing it with a new element.
 #[allow(dead_code)]
-pub async fn update_database(
+pub async fn update_share_database(
     conn: &SharesDbConn,
     search: Search,
     new_share: UrlID,
@@ -205,31 +263,6 @@ pub async fn update_database(
                 new_share.get_dest_url(),
                 search_result.get_id()
             ],
-        )
-    })
-    .await?;
-    Ok(())
-}
-
-/// Remove a share from the database.
-// WARNING: AS THIS FUNCTION IS UNUSED, IT IS ALSO UNTESTED.
-#[allow(dead_code)]
-pub async fn remove_from_database(
-    conn: &SharesDbConn,
-    search: Search,
-) -> Result<(), DatabaseError> {
-    let search_result = match search.find_share(conn).await? {
-        Some(s) => s,
-        None => return Err(DatabaseError::DoesNotExist),
-    };
-    conn.run(move |c| {
-        c.execute(
-            "
-        DELETE FROM shares
-        WHERE
-            id = ?1
-        ",
-            params![search_result.get_id()],
         )
     })
     .await?;
