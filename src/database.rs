@@ -1,14 +1,14 @@
 //! Functions and structs needed for interaction with the sqlite database.
-use crate::url_id::{UrlIDError, UrlID, UncommittedUrlID};
-use rocket_sync_db_pools::rusqlite::{self, params};
+use crate::url_id::{UncommittedUrlID, UrlID, UrlIDError};
 use rocket_sync_db_pools::database;
+use rocket_sync_db_pools::rusqlite::{self, params};
 
+/// A shared database
 #[doc(hidden)]
 #[database("sqlite_shares")]
-///A shared database 
 pub struct SharesDbConn(rusqlite::Connection);
 
-///An enum representing the database error states
+/// An enum representing the database error states
 #[derive(Debug)]
 pub enum DatabaseError {
     UrlIDError(UrlIDError),
@@ -26,13 +26,22 @@ impl From<rusqlite::Error> for DatabaseError {
 
 impl From<DatabaseError> for String {
     fn from(err: DatabaseError) -> String {
-        return match err {
+        match err {
             DatabaseError::DoesNotExist => "not found in database".to_string(),
-            DatabaseError::UrlIDError(s) => format!("a problem occured with a share when interacting with the database: {}", s.to_string()),
+            DatabaseError::UrlIDError(s) => format!(
+                "a problem occurred with a share when interacting with the database: {}",
+                s
+            ),
             DatabaseError::UnableToContact => "failed to connect to the database".to_string(),
-            DatabaseError::SqlError(s) => format!("an sql error occured when interfacing with the database: {}", s),
-            DatabaseError::InsertError(s) => format!("an error occured attempting to add a new share to the databse: {}", s),
-        } 
+            DatabaseError::SqlError(s) => format!(
+                "an sql error occurred when interfacing with the database: {}",
+                s
+            ),
+            DatabaseError::InsertError(s) => format!(
+                "an error occurred attempting to add a new share to the database: {}",
+                s
+            ),
+        }
     }
 }
 
@@ -40,11 +49,20 @@ impl std::fmt::Display for DatabaseError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             DatabaseError::DoesNotExist => f.write_str("not found in database"),
-            DatabaseError::UrlIDError(s) => f.write_str(&format!("a problem occured with a share when interacting with the database: {}", s.to_string())),
+            DatabaseError::UrlIDError(s) => f.write_str(&format!(
+                "a problem occurred with a share when interacting with the database: {}",
+                s
+            )),
             DatabaseError::UnableToContact => f.write_str("failed to connect to the database"),
-            DatabaseError::SqlError(s) => f.write_str(&format!("an sql error occured when interfacing with the database: {}", s)),
-            DatabaseError::InsertError(s) => f.write_str(&format!("an error occured attempting to add a new share to the databse: {}", s)),
-        } 
+            DatabaseError::SqlError(s) => f.write_str(&format!(
+                "an sql error occurred when interfacing with the database: {}",
+                s
+            )),
+            DatabaseError::InsertError(s) => f.write_str(&format!(
+                "an error occurred attempting to add a new share to the database: {}",
+                s
+            )),
+        }
     }
 }
 
@@ -60,7 +78,7 @@ impl std::convert::From<DatabaseError> for (rocket::http::Status, std::string::S
     }
 }
 
-///Specifies how to search for items in the database, with three options.
+/// Specifies how to search for items in the database, with three options.
 pub enum Search {
     Id(i64),
     #[allow(dead_code)]
@@ -68,7 +86,7 @@ pub enum Search {
 }
 
 impl Search {
-    ///Based on which variant of the enum you are using, generates the search term required to interface with the sqlite database.
+    /// Based on which variant of the enum you are using, generates the search term required to interface with the sqlite database.
     // Note, if adding to this function in the future, ensure to add '' around strings.
     fn get_search_term(self) -> String {
         match self {
@@ -86,27 +104,34 @@ impl Search {
     }
 }
 
-///Implementing a trait means that your struct can be parsed from a database row, or return an error.
+/// Implementing a trait means that your struct can be parsed from a database row, or return an error.
 pub trait FromDatabase: Sized {
     type Error: Send + std::fmt::Debug + Into<rocket_sync_db_pools::rusqlite::Error>;
-    fn from_database(data: &rocket_sync_db_pools::rusqlite::Row<'_> ) -> Result<Self, Self::Error>;
+    fn from_database(data: &rocket_sync_db_pools::rusqlite::Row<'_>) -> Result<Self, Self::Error>;
 }
 
-///Setup the database. Creates the table(s) required if they do not already exist in the database.db file.
+/// Setup the database. Creates the table(s) required if they do not already exist in the database.db file.
 pub async fn setup(conn: &SharesDbConn) -> Result<(), DatabaseError> {
     conn.run(|c| {
-        c.execute("CREATE TABLE IF NOT EXISTS shares (
+        c.execute(
+            "CREATE TABLE IF NOT EXISTS shares (
             id INTEGER PRIMARY KEY,
             exp BIGINT NOT NULL,
             crt BIGINT INT NOT NULL,
             url TEXT NOT NULL
-        );", [])
-    }).await?;
+        );",
+            [],
+        )
+    })
+    .await?;
     Ok(())
 }
 
-///Attempts to add a new share to the database. If successful, will return the added share (importantly) with an ID!
-pub async fn add_to_database(conn: &SharesDbConn, data: UncommittedUrlID) -> Result<UrlID, DatabaseError> {
+/// Attempts to add a new share to the database. If successful, will return the added share (importantly) with an ID!
+pub async fn add_to_database(
+    conn: &SharesDbConn,
+    data: UncommittedUrlID,
+) -> Result<UrlID, DatabaseError> {
     let response: UrlID = conn.run(move |c| -> Result<UrlID, DatabaseError> {
         let tx = c.transaction().unwrap();
         tx.execute("
@@ -122,7 +147,7 @@ pub async fn add_to_database(conn: &SharesDbConn, data: UncommittedUrlID) -> Res
             }).unwrap().collect()
         }).unwrap();
         tx.commit().unwrap();
-        //TODO Implement error handling here, lots of unwrap statements which could panic. At min should be exchanged for expect statements, or preferrably proper handling.
+        //TODO Implement error handling here, lots of unwrap statements which could panic. At min should be exchanged for expect statements, or preferably proper handling.
 
         Ok(result_data[0].clone())
     }).await?;
@@ -130,30 +155,42 @@ pub async fn add_to_database(conn: &SharesDbConn, data: UncommittedUrlID) -> Res
     Ok(response)
 }
 
-///This is a non-public function, utilised by Search.find_share(). It will search a database, matching against criteria. It returns a vec of possible elements which may match the query.
+/// This is a non-public function, utilised by Search.find_share(). It will search a database, matching against criteria. It returns a vec of possible elements which may match the query.
 async fn search_database(conn: &SharesDbConn, search: Search) -> Result<Vec<UrlID>, DatabaseError> {
-    let result = conn.run(move |c| {
-        c.prepare(&format!("Select * FROM shares WHERE {};", search.get_search_term()))
-        .and_then(|mut res: rusqlite::Statement| -> std::result::Result<Vec<UrlID>, rusqlite::Error> {
-            res.query_map([], |row| {
-                UrlID::from_database(row)
-            }).unwrap().collect()
+    let result = conn
+        .run(move |c| {
+            c.prepare(&format!(
+                "Select * FROM shares WHERE {};",
+                search.get_search_term()
+            ))
+            .and_then(
+                |mut res: rusqlite::Statement| -> std::result::Result<Vec<UrlID>, rusqlite::Error> {
+                    res.query_map([], |row| UrlID::from_database(row))
+                        .unwrap()
+                        .collect()
+                },
+            )
         })
-    }).await?;
+        .await?;
     Ok(result)
 }
 
-///Update an element in the database, replacing it with a new element.
+/// Update an element in the database, replacing it with a new element.
 #[allow(dead_code)]
-pub async fn update_database(conn: &SharesDbConn, search: Search, new_share: UrlID) -> Result<(), DatabaseError> {
+pub async fn update_database(
+    conn: &SharesDbConn,
+    search: Search,
+    new_share: UrlID,
+) -> Result<(), DatabaseError> {
     let search_result = match search.find_share(conn).await? {
         Some(s) => s,
         None => return Err(DatabaseError::DoesNotExist),
     };
-    
+
     conn.run(move |c| {
-        //SAFTEY: As we are searching by ID to update a share, we shouldn't ever update more than one UrlID at a time.
-        c.execute("
+        //SAFETY: As we are searching by ID to update a share, we shouldn't ever update more than one UrlID at a time.
+        c.execute(
+            "
             UPDATE shares
             SET exp = ?1,
                 crt = ?2,
@@ -161,30 +198,40 @@ pub async fn update_database(conn: &SharesDbConn, search: Search, new_share: Url
             WHERE
                 id = ?6
             ;
-        ", params![
-            new_share.get_exp(), 
-            new_share.get_crt(), 
-            new_share.get_dest_url(), 
-            search_result.get_id()
-        ])
-    }).await?;
+        ",
+            params![
+                new_share.get_exp(),
+                new_share.get_crt(),
+                new_share.get_dest_url(),
+                search_result.get_id()
+            ],
+        )
+    })
+    .await?;
     Ok(())
 }
 
-///Remove a share from the database.
+/// Remove a share from the database.
 // WARNING: AS THIS FUNCTION IS UNUSED, IT IS ALSO UNTESTED.
 #[allow(dead_code)]
-pub async fn remove_from_database(conn: &SharesDbConn, search: Search) -> Result<(), DatabaseError> {
+pub async fn remove_from_database(
+    conn: &SharesDbConn,
+    search: Search,
+) -> Result<(), DatabaseError> {
     let search_result = match search.find_share(conn).await? {
         Some(s) => s,
         None => return Err(DatabaseError::DoesNotExist),
     };
     conn.run(move |c| {
-        c.execute("
+        c.execute(
+            "
         DELETE FROM shares
         WHERE
             id = ?1
-        ", params![search_result.get_id()])
-    }).await?;
+        ",
+            params![search_result.get_id()],
+        )
+    })
+    .await?;
     Ok(())
 }
