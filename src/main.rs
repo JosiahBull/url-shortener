@@ -7,12 +7,17 @@ mod database;
 mod url_id;
 mod users;
 
+use std::borrow::Cow;
+
 use database::*;
-use rocket::fairing::AdHoc;
-use rocket::http::Status;
-use rocket::response::Redirect;
+use rocket::http::{CookieJar, Status};
+use rocket::response::{Flash, Redirect};
+use rocket::{fairing::AdHoc, form::Form};
+use rocket_dyn_templates::{context, Template};
 use url_id::*;
-use users::AdminUser;
+use users::User;
+
+use crate::users::NewUser;
 
 //Configuration
 /// The IP address of this server, should be set to your domain or IP.
@@ -28,7 +33,7 @@ const SERVER_DOMAIN: &str = "127.0.0.1:8000";
 /// ```
 #[post("/shorten", data = "<url_id>")]
 async fn create_shortened_url(
-    auth: AdminUser<'_>,
+    auth: User<'_>,
     url_id: UncommittedUrlID,
     conn: SharesDbConn,
 ) -> Result<String, (Status, String)> {
@@ -54,6 +59,9 @@ async fn get_page(token: String, conn: SharesDbConn) -> Result<Option<Redirect>,
     if search_result.is_none() {
         return Ok(None);
     }
+
+    database::increment_clicks(&conn, *search_result.as_ref().unwrap().get_id()).await?;
+
     Ok(Some(Redirect::to(
         search_result.unwrap().get_dest_url().to_owned(),
     ))) //SAFETY: This unwrap is fine as we have checked it is non-null above!
@@ -61,7 +69,7 @@ async fn get_page(token: String, conn: SharesDbConn) -> Result<Option<Redirect>,
 
 #[delete("/r/<token>")]
 async fn delete_page(
-    auth: AdminUser<'_>,
+    auth: User<'_>,
     token: String,
     conn: SharesDbConn,
 ) -> Result<(), (Status, String)> {
@@ -84,36 +92,68 @@ async fn delete_page_no_auth(token: String, conn: SharesDbConn) -> Result<(), (S
 }
 
 /// Load the admin page, which will allow you to view all shortened URLs, and delete them (if logged in)
-#[get("/admin")]
-async fn admin_page(auth: AdminUser<'_>, conn: SharesDbConn) -> Result<String, (Status, String)> {
-    // let all_shares = get_all_shares(&conn).await?;
-    // let mut html = String::from("<html><body><h1>Admin Page</h1><ul>");
-    // for share in all_shares {
-    //     html.push_str(&format!(
-    //         "<li><a href=\"{}\">{}</a> - <a href=\"{}\">Delete</a></li>",
-    //         share.get_shortened_link(),
-    //         share.get_shortened_link(),
-    //         format!("/delete/{}", share.get_id())
-    //     ));
-    // }
-    // html.push_str("</ul></body></html>");
-    // Ok(html)
+#[get("/dashboard?<page>")]
+async fn dashboard(auth: User<'_>, conn: SharesDbConn, page: u32) -> Template {
+    // get total count of shares
+    let total_count = get_total_share_count(&conn).await.unwrap();
+    let shares = Search::Page {
+        page: page.into(),
+        per_page: 10,
+    }
+    .find_shares(&conn)
+    .await
+    .unwrap();
 
-    Ok("Admin page".to_owned())
+    Template::render(
+        "admin",
+        context! {
+            shares: shares,
+            total: total_count,
+            page: page,
+        },
+    )
 }
 
-#[get("/admin", rank = 2)]
-async fn admin_page_no_auth(conn: SharesDbConn) -> Result<String, (Status, &'static str)> {
+#[get("/dashboard", rank = 2)]
+async fn dashboard_no_auth(conn: SharesDbConn) -> Result<String, (Status, &'static str)> {
     let res = "Unauthorized, consider logging in at <a href=\"/login\">/login</a>";
     Err((Status::Unauthorized, res))
 }
 
 #[get("/login")]
-async fn login_page() -> String {
-    "Login page".to_owned()
+async fn login() -> Template {
+    Template::render("login", context! {})
 }
 
-/// Automatically catch 404 errors and server a slightly more interesting response.
+#[post("/login", data = "<login>")]
+async fn login_form_submission(
+    conn: SharesDbConn,
+    login: Form<NewUser<'_>>,
+    cookies: &CookieJar<'_>,
+) -> Flash<Redirect> {
+    let user = login.into_inner();
+
+    // try to find user in db
+    let db_user = database::get_user_by_username(&conn, Cow::Borrowed(&user.username))
+        .await
+        .unwrap();
+    if db_user.is_none() {
+        return Flash::error(Redirect::to("/login"), "Invalid username or password");
+    }
+    let db_user = db_user.unwrap();
+
+    // validate login
+    if !user.compare_against(db_user.get_password()) {
+        return Flash::error(Redirect::to("/login"), "Invalid username or password");
+    }
+
+    // good login - generate cookie and redirect to dashboard
+    let cookie = user.username; //TODO: Expiry
+    cookies.add_private(rocket::http::Cookie::new("user", cookie.to_string()));
+    Flash::success(Redirect::to("/dashboard"), "Successfully logged in!")
+}
+
+/// Automatically catch 404 errors and serve a slightly more interesting response.
 #[catch(404)]
 #[doc(hidden)]
 fn not_found(req: &rocket::Request) -> String {
@@ -124,15 +164,29 @@ fn not_found(req: &rocket::Request) -> String {
 #[launch]
 fn rocket() -> _ {
     rocket::build()
-        .mount("/", routes![create_shortened_url])
-        .mount("/r", routes![get_page])
+        .mount("/r", routes![get_page, delete_page])
+        .mount("/r", routes![delete_page_no_auth])
+        .mount(
+            "/",
+            routes![
+                create_shortened_url,
+                dashboard,
+                login,
+                login_form_submission
+            ],
+        )
+        .mount(
+            "/",
+            routes![create_shortened_url_no_auth, dashboard_no_auth],
+        )
         .register("/", catchers![not_found])
+        .attach(Template::fairing())
         .attach(SharesDbConn::fairing())
         .attach(AdHoc::try_on_ignite("Database Init", |rocket| async {
             let conn = SharesDbConn::get_one(&rocket)
                 .await
                 .expect("database connection");
-            database::setup(&conn);
+            database::setup(&conn).await.unwrap(); //XXX return error
             Ok(rocket)
         }))
 }

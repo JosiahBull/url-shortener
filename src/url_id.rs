@@ -176,7 +176,7 @@ impl UncommittedUrlID {
 }
 
 /// This struct represents a valid url ID
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct UrlID {
     ///ID
     id: i64,
@@ -186,26 +186,23 @@ pub struct UrlID {
     crt: i64,
     /// Url this redirects to
     url: String,
-}
-
-impl Default for UrlID {
-    fn default() -> Self {
-        UrlID {
-            id: std::i64::MAX,
-            exp: std::i64::MAX,
-            crt: get_time_seconds(),
-            url: String::default(),
-        }
-    }
+    /// Number of times this url has been accessed
+    count: i64,
+    /// The id of the user who created the share
+    user_id: i64,
 }
 
 impl UrlID {
     /// Creates a new UrlID with a given url.
     #[allow(dead_code)]
-    pub fn new(url: String) -> Self {
+    pub fn new(url: String, user_id: i64) -> Self {
         UrlID {
             url,
-            ..Default::default()
+            user_id,
+            id: std::i64::MAX,
+            exp: std::i64::MAX,
+            crt: get_time_seconds(),
+            count: 0,
         }
     }
 
@@ -232,6 +229,12 @@ impl UrlID {
     /// Get the time this shortened link was created.
     pub fn get_crt(&self) -> &i64 {
         &self.crt
+    }
+
+    #[allow(dead_code)]
+    /// Get the number of times this url has been accessed.
+    pub fn get_count(&self) -> &i64 {
+        &self.count
     }
 
     /// Generates the unique identifier representing this shortened url. Can be chained with other requests, though this borrows mutably unlike others.
@@ -272,6 +275,8 @@ impl<'a> crate::database::FromDatabase<'a> for UrlID {
             exp: row.get(1).unwrap(),
             crt: row.get(2).unwrap(),
             url: row.get(3).unwrap(),
+            count: row.get(4).unwrap(),
+            user_id: row.get(5).unwrap(),
         })
     }
 }

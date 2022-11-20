@@ -1,4 +1,6 @@
 //! Functions and structs needed for interaction with the sqlite database.
+use std::borrow::Cow;
+
 use crate::url_id::{UncommittedUrlID, UrlID, UrlIDError};
 use crate::users::{NewUser, User};
 use rocket_sync_db_pools::database;
@@ -84,6 +86,10 @@ pub enum Search {
     Id(i64),
     #[allow(dead_code)]
     Url(String),
+    Page {
+        page: i64,
+        per_page: i64,
+    },
 }
 
 impl Search {
@@ -91,10 +97,14 @@ impl Search {
     // Note, if adding to this function in the future, ensure to add '' around strings.
     fn get_search_term(self) -> String {
         match self {
-            Search::Id(s) => format!("{} = {}", "id", s),
-            Search::Url(s) => format!("{} = '{}'", "url", s),
+            Search::Id(s) => format!("WHERE {} = {}", "id", s),
+            Search::Url(s) => format!("WHERE {} = '{}'", "url", s),
+            Search::Page { page, per_page } => {
+                format!("LIMIT {} OFFSET {}", per_page, (page - 1) * per_page)
+            }
         }
     }
+
     ///Run a search, returns the first result it finds in the database, or a DatabaseError if something goes wrong.
     pub async fn find_share(self, conn: &SharesDbConn) -> Result<Option<UrlID>, DatabaseError> {
         let search_result = search_share_database(conn, self).await?;
@@ -102,6 +112,10 @@ impl Search {
             return Ok(None);
         }
         Ok(Some(search_result[0].clone())) //Assume first result is correct, user will use search::id() variant if exactness is important.
+    }
+
+    pub async fn find_shares(self, conn: &SharesDbConn) -> Result<Vec<UrlID>, DatabaseError> {
+        search_share_database(conn, self).await
     }
 }
 
@@ -121,7 +135,10 @@ pub async fn setup(conn: &SharesDbConn) -> Result<(), DatabaseError> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             exp BIGINT NOT NULL,
             crt BIGINT INT NOT NULL,
-            url TEXT NOT NULL
+            url TEXT NOT NULL,
+            count INT NOT NULL,
+            user_id INT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
         );",
             [],
         )?;
@@ -130,8 +147,7 @@ pub async fn setup(conn: &SharesDbConn) -> Result<(), DatabaseError> {
             "CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL,
-                password TEXT NOT NULL,
-                is_admin BOOLEAN NOT NULL
+                password TEXT NOT NULL
             );",
             [],
         )
@@ -175,10 +191,10 @@ pub async fn add_user_to_database<'a>(
     let response: User = conn.run(move |c| -> Result<User, DatabaseError> {
         let tx = c.transaction().unwrap();
         tx.execute("
-            INSERT INTO users (username, password, is_admin)
+            INSERT INTO users (username, password)
             VALUES (?1, ?2, ?3);
         ", params![
-            data.username, data.password, data.is_admin
+            data.username, data.password
         ]).expect("failed to create user in db!");
 
         let mut result_data: Vec<User> = tx.prepare("SELECT * FROM users ORDER BY id DESC LIMIT 1;")
@@ -218,7 +234,7 @@ async fn search_share_database(
     let result = conn
         .run(move |c| {
             c.prepare(&format!(
-                "Select * FROM shares WHERE {};",
+                "Select * FROM shares {};",
                 search.get_search_term()
             ))
             .and_then(
@@ -263,6 +279,55 @@ pub async fn update_share_database(
                 new_share.get_dest_url(),
                 search_result.get_id()
             ],
+        )
+    })
+    .await?;
+    Ok(())
+}
+
+pub async fn get_user_by_username<'a>(
+    conn: &'a SharesDbConn,
+    username: Cow<'a, str>,
+) -> Result<Option<User<'a>>, DatabaseError> {
+    let username = username.to_string();
+    let mut result: Vec<User<'a>> = conn
+        .run(move |c| {
+            c.prepare("Select * FROM users WHERE username = ?1;")
+                .and_then(|mut res: rusqlite::Statement| {
+                    res.query_map(params![username], |row| User::from_database(row))
+                        .unwrap()
+                        .collect()
+                })
+        })
+        .await?;
+
+    Ok(result.pop())
+}
+
+pub async fn get_total_share_count(conn: &SharesDbConn) -> Result<i64, DatabaseError> {
+    let mut result: Vec<i64> = conn
+        .run(move |c| {
+            c.prepare("Select count(*) FROM shares;")
+                .and_then(|mut res: rusqlite::Statement| {
+                    res.query_map([], |row| row.get(0)).unwrap().collect()
+                })
+        })
+        .await?;
+
+    Ok(result.pop().unwrap())
+}
+
+pub async fn increment_clicks(conn: &SharesDbConn, id: i64) -> Result<(), DatabaseError> {
+    conn.run(move |c| {
+        c.execute(
+            "
+            UPDATE shares
+            SET clicks = clicks + 1
+            WHERE
+                id = ?1
+            ;
+        ",
+            params![id],
         )
     })
     .await?;

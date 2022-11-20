@@ -1,0 +1,45 @@
+{# A page showing a list of shares, each showing when it was created, number of redirects, and it's url #}
+{# Should extend from base.tera, and include buttons for next/previous page (optionally) #}
+
+{% extends "base.tera" %}
+
+{% block title %}Admin{% endblock %}
+
+{% block content %}
+    <h1>Redirects</h1>
+    <table>
+        <tr>
+            <th>Created</th>
+            <th>Usage</th>
+            <th>Url</th>
+        </tr>
+        {% for share in shares %}
+            <tr>
+                <td>{{ share.created }}</td>
+                <td>{{ share.redirects }}</td>
+                <td><a href="{{ share.url }}">{{ share.url }}</a></td>
+                <td><button onclick="removeShare('{{ share.url }}')">Remove</button></td>
+            </tr>
+        {% endfor %}
+    </table>
+
+    <p>Showing {{ shares.len() }} of {{ total }}</p>
+    {% if page > 1 %}
+        <a href="/dashboard?page={{ page - 1 }}">Previous</a>
+    {% endif %}
+    {% if page * 10 < total %}
+        <a href="/dashboard?page={{ page + 1 }}">Next</a>
+    {% endif %}
+
+    <script>
+        function removeShare(url) {
+            fetch(url, {
+                method: 'DELETE'
+            }).then(function(response) {
+                if (response.ok) {
+                    window.location.reload();
+                }
+            });
+        }
+    </script>
+{% endblock %}
